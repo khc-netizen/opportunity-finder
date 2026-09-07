@@ -3,8 +3,6 @@ name: Temporary NEO-RLS fix
 on:
   push:
     branches: [main]
-    paths:
-      - '.github/workflows/fix-3.9.4-workflow.yml'
 
 permissions:
   contents: write
