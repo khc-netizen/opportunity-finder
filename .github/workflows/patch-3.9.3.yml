@@ -1,0 +1,181 @@
+name: Patch 3.9.3 discovery parsers
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ hashFiles('.github/patch-3.9.3.flag') != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch worker
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('worker/index.js')
+          s = p.read_text()
+
+          s = s.replace('const VERSION = "3.9.2";', 'const VERSION = "3.9.3";', 1)
+          s = s.replace('const BUILD = "v3.9.2-trusted-event-sources";', 'const BUILD = "v3.9.3-trusted-calendar-and-job-parser";', 1)
+          marker = 'const CAREER_RE ='
+          if 'const AMISH_RE =' not in s:
+              s = s.replace(marker, 'const AMISH_RE = /\\bamish\\b|\\bamish[- ]owned\\b|\\bamish[- ]run\\b/i;\\n' + marker, 1)
+
+          event_start = s.index('function parseEvents(')
+          event_end = s.index('function flattenJsonLd(', event_start)
+          event_fn = r'''function parseEvents(html, baseUrl, interests, city, state, org, radius = 75) {
+            const base = new URL(baseUrl), events = [], text = clean(html), evidence = [];
+            const jsonld = [];
+            for (const m of html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
+              try { jsonld.push(...flattenJsonLd(JSON.parse(m[1].trim()))); } catch {}
+            }
+            for (const x of jsonld) {
+              const type = Array.isArray(x["@type"]) ? x["@type"].join(" ") : String(x["@type"] || "");
+              if (!/Event/i.test(type) || !x.name) continue;
+              const location = formatLocation(x.location), combined = `${x.name} ${x.description || ""} ${location} ${typeof x.organizer === "object" ? x.organizer?.name || "" : x.organizer || ""}`;
+              if (DANCE_RE.test(combined) || AMISH_RE.test(combined)) continue;
+              const geo = geographicEvidence(`${combined} ${text.slice(0, 8000)}`, city, state);
+              const distance = estimateDistance(`${city}, ${state}`, location);
+              if (geo.score < 45 || (distance != null && distance > radius)) continue;
+              events.push({
+                id: key(x.name, x.url || base.href), title: clean(x.name),
+                description: clean(x.description || "").slice(0, 1000),
+                url: abs(x.url || base.href, base), date: x.startDate, endDate: x.endDate || "",
+                location, organizer: clean(typeof x.organizer === "object" ? x.organizer?.name || org.name : x.organizer || org.name),
+                source: "JSON-LD Event", score: relevanceScore(combined, interests) + geo.score,
+                type: "event", discoveryQuality: "verified", locationScore: geo.score,
+                distanceMiles: distance, distance, org: org.name, host: org.name
+              });
+            }
+            if (events.length) evidence.push("JSON-LD Event");
+
+            for (const m of html.matchAll(/<(article|li|div|section)[^>]*>([\s\S]*?)<\/\1>/gi)) {
+              const block = clean(m[2]);
+              const date = findDate(block);
+              if (!date || !EVENT_RE.test(block) || DANCE_RE.test(block) || AMISH_RE.test(block) || ARTICLE_RE.test(block.slice(0, 500))) continue;
+              const geo = geographicEvidence(`${block} ${text.slice(0, 5000)}`, city, state);
+              const location = extractLocation(block, city, state);
+              const distance = estimateDistance(`${city}, ${state}`, location);
+              if (geo.score < 45 || (distance != null && distance > radius)) continue;
+              const h = clean((m[2].match(/<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/i) || [])[1] || block.slice(0, 160));
+              if (h.length < 4) continue;
+              events.push({
+                id: key(h, base.href + "#" + date), title: h, description: block.slice(0, 1000),
+                url: base.href, date, endDate: "", location, organizer: org.name,
+                source: "validated event block", score: relevanceScore(block, interests) + geo.score,
+                type: "event", discoveryQuality: "verified", locationScore: geo.score,
+                distanceMiles: distance, distance, org: org.name, host: org.name
+              });
+            }
+            if (events.length && !evidence.includes("HTML event block")) evidence.push("HTML event block");
+
+            const lines = calendarLines(html);
+            for (let i = 0; i < lines.length; i++) {
+              const line = lines[i];
+              const dm = line.match(/^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(\d{1,2})$|^([A-Z][a-z]+)\s+(\d{1,2})(?:,?\s+(20\d{2}))?$/);
+              if (!dm) continue;
+              const month = dm[2], day = Number(dm[1] || dm[3]), year = Number(dm[4] || new Date().getFullYear());
+              const next = lines.slice(i + 1, i + 8).find(x =>
+                /[A-Za-z]{4,}/.test(x) && x.length >= 8 &&
+                !/^(Image:|Featured|Get Tickets|Previous Events|Next Events|Century Village Museum|Auburn Church|Support the Century Village Museum)/i.test(x) &&
+                !/^(Home|Events|Calendar|Tickets|Search|List|Month|Day|Today|Upcoming|Select date)/i.test(x)
+              );
+              if (!next || DANCE_RE.test(next) || AMISH_RE.test(next)) continue;
+              const combined = `${next} ${line} ${text.slice(0, 1500)}`;
+              const geo = geographicEvidence(`${combined} ${org.name}`, city, state);
+              const distance = estimateDistance(`${city}, ${state}`, `${org.name} ${text.slice(0, 1200)}`);
+              if (geo.score < 45 || (distance != null && distance > radius)) continue;
+              const iso = `${year}-${String(monthNumber(month)).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+              events.push({
+                id: key(next, base.href + "#" + iso), title: clean(next), description: clean(next),
+                url: base.href, date: iso, endDate: "", location: extractLocation(text.slice(0, 1800), city, state),
+                organizer: org.name, source: "validated calendar listing",
+                score: relevanceScore(next, interests) + geo.score, type: "event",
+                discoveryQuality: "verified", locationScore: geo.score, distanceMiles: distance, distance,
+                org: org.name, host: org.name
+              });
+            }
+            if (events.length && !evidence.includes("validated calendar listing")) evidence.push("validated calendar listing");
+
+            if (!events.length) return { events: [], evidence, rejectReason: !EVENT_RE.test(text) ? "no event-specific evidence" : "no validated local event" };
+            return { events: dedupeBy(events, x => key(x.title, x.url + x.date)), evidence, rejectReason: null };
+          }
+          function calendarLines(html) {
+            return stripHtml(String(html || "").replace(/<\/?(?:h[1-6]|p|li|article|section|div|br|tr|td|th|header|footer|main|nav)[^>]*>/gi, "\n"))
+              .split(/\n+/).map(clean).filter(x => x.length >= 3 && x.length <= 500);
+          }
+          function monthNumber(m) {
+            const n = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+            return n[String(m || "").slice(0,3).toLowerCase()] || 1;
+          }
+          '''
+          s = s[:event_start] + event_fn + s[event_end:]
+
+          jobs_start = s.index('function parseJobs(')
+          jobs_end = s.index('\nasync function diagnostics(', jobs_start)
+          jobs_fn = r'''function parseJobs(html, baseUrl, interests, city, state, radius = 30, options = {}) {
+            const base = new URL(baseUrl), text = clean(html), jobs = [], jsonld = [];
+            const trusted = /neo-rls\.org/i.test(base.hostname) || /trusted job source/i.test(options.source || "");
+            for (const m of html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
+              try { jsonld.push(...flattenJsonLd(JSON.parse(m[1].trim()))); } catch {}
+            }
+            for (const x of jsonld) {
+              const type = Array.isArray(x["@type"]) ? x["@type"].join(" ") : String(x["@type"] || "");
+              if (!/JobPosting/i.test(type) || !x.title) continue;
+              const loc = formatLocation(x.jobLocation), org = typeof x.hiringOrganization === "object" ? x.hiringOrganization?.name || "" : x.hiringOrganization || "";
+              const combined = `${x.title} ${org} ${x.description || ""} ${loc}`;
+              if (DANCE_RE.test(combined) || AMISH_RE.test(combined)) continue;
+              const geo = geographicEvidence(`${loc} ${x.description || ""}`, city, state);
+              const distance = estimateDistance(`${city}, ${state}`, loc), localByCity = !!cityKey(loc);
+              if ((geo.score < 45 && !(trusted && localByCity)) || (distance != null && distance > radius)) continue;
+              if (options.partTime && !partTimeMatch(x)) continue;
+              jobs.push({ id: key(x.title, x.url || base.href), title: clean(x.title), organization: clean(org), url: abs(x.url || base.href, base), description: clean(x.description || "").slice(0, 1100), date: x.datePosted || "", closeDate: x.validThrough || "", location: loc, employmentType: clean(x.employmentType || ""), source: options.source || "JSON-LD JobPosting", score: relevanceScore(combined, interests) + geo.score, type: "job", discoveryQuality: "verified", locationScore: Math.max(geo.score, localByCity ? 50 : 0), distanceMiles: distance });
+            }
+            for (const m of html.matchAll(/<(h[1-6])[^>]*>([\s\S]*?)<\/\1>([\s\S]{0,7000}?)(?=<h[1-6][^>]*>|$)/gi)) {
+              const title = clean(m[2]), block = clean(m[3]);
+              if (!looksLikeJobTitle(title) || !block || DANCE_RE.test(`${title} ${block}`) || AMISH_RE.test(`${title} ${block}`)) continue;
+              const combined = `${title} ${block}`;
+              if (CAREER_RE.test(title) && !/(part[- ]?time|full[- ]?time|hours?|salary|wage|apply|position|job)/i.test(block)) continue;
+              const local = geographicEvidence(combined, city, state), localByCity = !!cityKey(combined);
+              const distance = estimateDistance(`${city}, ${state}`, combined);
+              if ((local.score < 45 && !(trusted && localByCity)) || (distance != null && distance > radius)) continue;
+              if (options.partTime && !partTimeTextMatch(combined)) continue;
+              const date = findDate(combined), url = base.href;
+              jobs.push({ id: key(title, url + "#" + date), title, organization: extractJobOrganization(combined), url, description: block.slice(0, 1100), date, closeDate: findCloseDate(combined), location: extractJobLocation(combined, city, state), employmentType: /part[- ]?time/i.test(combined) ? "Part-time" : /full[- ]?time/i.test(combined) ? "Full-time" : "", source: options.source || "validated job block", score: relevanceScore(combined, interests) + local.score, type: "job", discoveryQuality: "verified", locationScore: Math.max(local.score, localByCity ? 50 : 0), distanceMiles: distance });
+            }
+            return dedupeBy(jobs, x => key(x.title, x.url));
+          }
+          function looksLikeJobTitle(t) { return t.length >= 5 && t.length <= 180 && !/^(view job postings|job seekers|category|keyword|home|services|about)$/i.test(t) && !EVENT_RE.test(t); }
+          function partTimeMatch(x) { return partTimeTextMatch(`${x.employmentType || ""} ${x.description || ""}`); }
+          function partTimeTextMatch(t) { return /part[- ]?time|20\s*hours?|32\s*hours?|15\s*hours?|12\s*hours?|hourly/i.test(String(t || "")); }
+          function extractJobOrganization(t) { const m=t.match(/(?:at|for)\s+([A-Z][A-Za-z0-9&'’ .-]{2,100})(?:\s+(?:is|has|seeks|seeking|located|in)\b|$)/); return m ? clean(m[1]) : ""; }
+          function extractJobLocation(t, city, state) { const m=t.match(new RegExp(`.{0,100}\\b${escapeRe(city)}\\b.{0,100}`, "i")); return clean(m ? m[0] : `${city}, ${state}`); }
+          function findCloseDate(t) { const m=t.match(/(?:closes?|deadline|expires?|application close(?:s)?)[^\d]{0,30}(\b(?:20\d{2}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[/-]\d{1,2}[/-]20\d{2}|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:,\s*20\d{2})?))/i); return m ? m[1] : ""; }
+          '''
+          s = s[:jobs_start] + jobs_fn + s[jobs_end:]
+
+          p.write_text(s)
+          PY
+          node --check worker/index.js
+          node --input-type=module <<'NODE'
+          import { parseEvents, parseJobs } from './worker/index.js';
+          const eventHtml = '<html><body><h1>Events Calendar</h1><div><h4>Light Up The Night – Balloon Festival</h4><div>September 11 2026</div><div>Century Village Museum 14653 E Park St, Burton, OH 44021</div></div></body></html>';
+          const e = parseEvents(eventHtml, 'https://centuryvillagemuseum.org/events-calendar/', ['history','museums'], 'Mesopotamia', 'OH', {name:'Century Village Museum'}, 75);
+          if (!e.events.length) throw new Error('synthetic event parser test failed');
+          const jobHtml = '<html><body><h2>Delivery Driver (Part Time) - Warren-Trumbull County Public Library</h2><div>This part-time position is in Warren, Ohio. Apply now.</div><h2>Building Maintenance Worker (Part Time) - Warren-Trumbull County Public Library</h2><div>Part-time position in Warren, OH.</div></body></html>';
+          const j = parseJobs(jobHtml, 'https://www.neo-rls.org/view_job_postings.php', ['library'], 'Mesopotamia', 'OH', 30, {source:'NEO-RLS', partTime:true});
+          if (j.length < 2) throw new Error('synthetic job parser test failed');
+          console.log('3.9.3 parser tests passed', {events:e.events.length, jobs:j.length});
+          NODE
+          rm -f .github/patch-3.9.3.flag .github/workflows/patch-3.9.3.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add worker/index.js .github
+          git commit -m "feat: strengthen trusted event and job parsing"
+          git push
