@@ -1,0 +1,49 @@
+name: Phase 3.9.4c parser patch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/patch-3.9.4c.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Patch worker
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('worker/index.js'); s=p.read_text()
+          s=s.replace('const VERSION = "3.9.3";','const VERSION = "3.9.4";',1)
+          s=s.replace('const BUILD = "v3.9.3-local-job-and-event-parser";','const BUILD = "v3.9.4-targeted-job-event-repair";',1)
+          s=s.replace('const geo = geographicEvidence(block + " " + text.slice(0, 5000), city, state);','const geo = geographicEvidence(block, city, state);',1)
+          s=s.replace('const date = findDate(block);\n    if (!date || !EVENT_RE.test(block)','const date = findDate(block);\n    if (/\\b(?:bc|bce)\\b/i.test(block) || /\\b(?:solar eclipse|antipope|earl godwine|king edward|battle of arsuf)\\b/i.test(block)) continue;\n    if (!date || !EVENT_RE.test(block)',1)
+          old='return { events: dedupeBy(events, x => key(x.title, x.url + x.date)), evidence, rejectReason: null };'
+          new='''return { events: dedupeEvents(events), evidence, rejectReason: null };\n}\nfunction dedupeEvents(items) {\n  const seen = new Map();\n  for (const item of items) {\n    const k = `${eventTitleKey(item.title)}|${norm(item.date || "")}|${norm(item.location || "")}`;\n    const old = seen.get(k);\n    if (!old || (item.source === "JSON-LD Event" && old.source !== "JSON-LD Event")) seen.set(k, item);\n  }\n  return [...seen.values()];\n}\nfunction eventTitleKey(title) {\n  return norm(title).replace(/^(?:sun|mon|tue|wed|thu|fri|sat)\\s+\\d{1,2}\\s+/i, "").replace(/\\bfeatured\\b/g, "").replace(/\\b20\\d{2}\\b/g, "").replace(/\\b(?:century village museum|auburn church)\\b/g, "").replace(/\\s+/g, " ").trim();'''
+          if old not in s: raise SystemExit('event target missing')
+          s=s.replace(old,new,1)
+          marker='  return dedupeBy(jobs, x => key(x.title, x.url));\n}'
+          fallback='''  for (const m of html.matchAll(/<a[^>]+href=["']([^"']+)["'][^>]*>\\s*([^<]{5,180})\\s*<\\/a>([\\s\\S]{0,7000}?)(?:Read More|(?=<a[^>]+href=["']))/gi)) {\n    const title=clean(m[2]), block=clean(m[3]);\n    if (!looksLikeJobTitle(title) || !block) continue;\n    const combined=`${title} ${block}`;\n    if (DANCE_RE.test(combined) || AMISH_RE.test(combined)) continue;\n    if (options.partTime && !/(part[- ]?time|\\b\\d{1,2}\\s*(?:-|to)\\s*\\d{1,2}\\s*hours?\\b|20\\s*hours?|32\\s*hours?|hourly)/i.test(combined)) continue;\n    const geo=geographicEvidence(combined,city,state), distance=estimateDistance(`${city}, ${state}`,combined), localByCity=!!cityKey(combined);\n    if ((geo.score<45 && !(trusted && localByCity)) || (distance!=null && distance>radius)) continue;\n    const date=findDate(combined), url=abs(m[1],base);\n    jobs.push({id:key(title,url+"#"+date),title,organization:extractJobOrganization(combined),url,description:block.slice(0,1100),date,closeDate:findCloseDate(combined),location:extractJobLocation(combined,city,state),employmentType:/part[- ]?time/i.test(combined)?"Part-time":/full[- ]?time/i.test(combined)?"Full-time":"",source:options.source||"validated job block",score:relevanceScore(combined,interests)+geo.score,type:"job",discoveryQuality:"verified",locationScore:geo.score,distanceMiles:distance});\n  }\n  return dedupeBy(jobs, x => key(x.title, x.url));\n}'''
+          if marker not in s: raise SystemExit('job target missing')
+          s=s.replace(marker,fallback,1)
+          p.write_text(s)
+          PY
+      - name: Syntax and module validation
+        run: |
+          node --check worker/index.js
+          node --input-type=module -e "import('./worker/index.js').then(m=>{if(typeof m.parseJobs!=='function'||typeof m.parseEvents!=='function')process.exit(1);console.log('parser exports OK')})"
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add worker/index.js
+          git commit -m "Phase 3.9.4 repair job and event parsers" || exit 0
+          git push origin main
