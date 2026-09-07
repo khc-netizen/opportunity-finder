@@ -55,8 +55,8 @@ export default {
   }
 };
 
-const VERSION = "3.9.0";
-const BUILD = "v3.9.0-clean-local-validation";
+const VERSION = "3.9.1";
+const BUILD = "v3.9.1-jobs-source-priority";
 const SEARCH_LIMIT = 10;
 const PAGE_LIMIT = 72;
 
@@ -503,22 +503,21 @@ function relevanceScore(text, interests) { const t = norm(text); let s = 0; for 
 
 async function discoverJobs(interests, city, state, radius, partTime, env) {
   const budget = { used: 0, limit: Number(env?.DISCOVERY_FETCH_LIMIT || 72) };
-  const diagnostics = [], candidates = [];
-  for (const query of buildJobQueries(interests, city, state)) {
-    const r = await searchWeb(query, env, budget);
-    diagnostics.push({ stage: "job-search", query, ok: r.ok, status: r.status, parser: r.parser || null, candidates: r.urls.length, milliseconds: r.milliseconds, bytes: r.bytes, error: r.ok ? null : r.error });
-    for (const u of r.urls) if (acceptDiscoveryUrl(u, state)) candidates.push({ url: u, query });
-  }
-  const items = [];
-  for (const c of dedupeCandidateUrls(candidates).slice(0, 12)) {
-    const pr = await fetchText(c.url, {}, budget);
-    const d = { stage: "job-validation", url: c.url, ok: pr.ok, status: pr.status, accepted: 0, rejected: null };
-    if (!pr.ok) { d.rejected = pr.error || `HTTP ${pr.status}`; diagnostics.push(d); continue; }
-    const found = parseJobs(pr.text, c.url, interests, city, state, radius);
-    d.accepted = found.length; d.rejected = found.length ? null : "no validated local JobPosting/career opportunity"; diagnostics.push(d); items.push(...found);
+  const diagnostics = [], items = [];
+  const trustedSources = ["https://www.neo-rls.org/view_job_postings.php", ...listEnv(env, "JOB_SOURCES")];
+  for (const source of [...new Set(trustedSources)]) {
+    if (budget.used >= budget.limit) break;
+    const r = await fetchText(source, {}, budget);
+    const d = { stage: "trusted-job-source", url: source, ok: r.ok, status: r.status, accepted: 0, rejected: null };
+    if (!r.ok) { d.rejected = r.error || `HTTP ${r.status}`; diagnostics.push(d); continue; }
+    const found = parseJobs(r.text, source, interests, city, state, radius, { source: source.includes("neo-rls.org") ? "NEO-RLS" : "trusted job source", partTime });
+    d.accepted = found.length; d.rejected = found.length ? null : "no validated local jobs from trusted source";
+    diagnostics.push(d); items.push(...found);
   }
   for (const query of buildUSAQueries(interests)) {
-    const url = new URL("https://data.usajobs.gov/api/search"); url.searchParams.set("Keyword", query); url.searchParams.set("LocationName", `${city}, ${state}`); url.searchParams.set("Radius", String(radius)); url.searchParams.set("ResultsPerPage", "20");
+    if (budget.used >= budget.limit) break;
+    const url = new URL("https://data.usajobs.gov/api/search");
+    url.searchParams.set("Keyword", query); url.searchParams.set("LocationName", `${city}, ${state}`); url.searchParams.set("Radius", String(radius)); url.searchParams.set("ResultsPerPage", "20");
     const headers = {};
     if (env?.USAJOBS_KEY) headers.AuthorizationKey = env.USAJOBS_KEY;
     if (env?.USAJOBS_EMAIL) headers["User-Agent"] = env.USAJOBS_EMAIL;
@@ -528,34 +527,66 @@ async function discoverJobs(interests, city, state, radius, partTime, env) {
     try {
       const j = JSON.parse(r.text);
       for (const x of j?.SearchResult?.SearchResultItems || []) {
-        const d = x.MatchedObjectDescriptor || {}, loc = (d.PositionLocationDisplay || "");
-        const geo = geographicEvidence(loc, city, state); if (geo.score < 45) continue;
-        const distance = estimateDistance(`${city}, ${state}`, loc); if (distance != null && distance > radius) continue;
-        items.push({ id: key(d.PositionID || d.PositionTitle, d.PositionURI || url.href), title: d.PositionTitle || "USAJOBS opportunity", organization: d.OrganizationName || "", url: d.PositionURI || "https://www.usajobs.gov/", description: clean(d.UserArea?.Details?.JobSummary || "").slice(0, 1100), date: d.PublicationStartDate || "", closeDate: d.ApplicationCloseDate || "", location: loc, employmentType: d.PositionScheduleType?.[0]?.Name || "", source: "USAJOBS", score: relevanceScore(`${d.PositionTitle || ""} ${d.OrganizationName || ""}`, interests) + geo.score, type: "job", discoveryQuality: "verified", locationScore: geo.score, distanceMiles: distance });
+        const d = x.MatchedObjectDescriptor || {}, loc = d.PositionLocationDisplay || "";
+        const geo = geographicEvidence(loc, city, state), distance = estimateDistance(`${city}, ${state}`, loc);
+        if (geo.score < 45 || (distance != null && distance > radius)) continue;
+        const combined = `${d.PositionTitle || ""} ${d.OrganizationName || ""} ${d.UserArea?.Details?.JobSummary || ""} ${loc}`;
+        if (DANCE_RE.test(combined)) continue;
+        items.push({ id: key(d.PositionID || d.PositionTitle, d.PositionURI || url.href), title: d.PositionTitle || "USAJOBS opportunity", organization: d.OrganizationName || "", url: d.PositionURI || "https://www.usajobs.gov/", description: clean(d.UserArea?.Details?.JobSummary || "").slice(0, 1100), date: d.PublicationStartDate || "", closeDate: d.ApplicationCloseDate || "", location: loc, employmentType: d.PositionScheduleType?.[0]?.Name || "", source: "USAJOBS", score: relevanceScore(combined, interests) + geo.score, type: "job", discoveryQuality: "verified", locationScore: geo.score, distanceMiles: distance });
       }
-    } catch {}
+    } catch (e) { diagnostics.push({ stage: "usajobs-parse", query, ok: false, rejected: errorMessage(e) }); }
+  }
+  for (const query of buildJobQueries(interests, city, state)) {
+    if (budget.used >= budget.limit) break;
+    const r = await searchWeb(query, env, budget);
+    diagnostics.push({ stage: "job-search", query, ok: r.ok, status: r.status, parser: r.parser || null, candidates: r.urls.length, milliseconds: r.milliseconds, bytes: r.bytes, error: r.ok ? null : r.error });
+    for (const u of r.urls.slice(0, 5)) {
+      if (budget.used >= budget.limit) break;
+      if (!acceptDiscoveryUrl(u, state) || CAREER_RE.test(u)) continue;
+      const pr = await fetchText(u, {}, budget);
+      const d = { stage: "job-validation", url: u, ok: pr.ok, status: pr.status, accepted: 0, rejected: null };
+      if (!pr.ok) { d.rejected = pr.error || `HTTP ${pr.status}`; diagnostics.push(d); continue; }
+      const found = parseJobs(pr.text, u, interests, city, state, radius, { source: "validated job page", partTime });
+      d.accepted = found.length; d.rejected = found.length ? null : "no validated local job posting";
+      diagnostics.push(d); items.push(...found);
+    }
   }
   const unique = dedupeBy(items, x => key(x.title, x.url)).slice(0, 100);
   return { ok: true, version: VERSION, build: BUILD, city, state, radius, partTime, counts: { jobs: unique.length }, items: unique, jobs: unique, fetchBudget: budget, diagnostics };
 }
 function buildJobQueries(interests, city, state) { const base = interestBase(interests).slice(0, 6), p = `"${city}" ${state}`; return [...new Set(base.map(x => `"${x}" ${p} (jobs OR careers OR employment OR hiring) -dance`))].slice(0, 6); }
 function buildUSAQueries(interests) { const src = interests.length ? interests : ["museum archaeology historic preservation", "welder fabrication woodworking", "bicycle mechanic", "parks recreation cultural resources"]; return [...new Set(src)].slice(0, 4); }
-function parseJobs(html, baseUrl, interests, city, state, radius = 30) {
-  const base = new URL(baseUrl), text = clean(html), jobs = [];
-  const jsonld = [];
-  for (const m of html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) { try { jsonld.push(...flattenJsonLd(JSON.parse(m[1].trim()))); } catch {} }
+function parseJobs(html, baseUrl, interests, city, state, radius = 30, options = {}) {
+  const base = new URL(baseUrl), text = clean(html), jobs = [], jsonld = [];
+  for (const m of html.matchAll(/<script[^>]+type=["']application\\/ld\\+json["'][^>]*>([\\s\\S]*?)<\\/script>/gi)) { try { jsonld.push(...flattenJsonLd(JSON.parse(m[1].trim()))); } catch {} }
   for (const x of jsonld) {
-    const type = Array.isArray(x["@type"]) ? x["@type"].join(" ") : String(x["@type"] || ""); if (!/JobPosting/i.test(type) || !x.title) continue;
+    const type = Array.isArray(x["@type"]) ? x["@type"].join(" ") : String(x["@type"] || "");
+    if (!/JobPosting/i.test(type) || !x.title) continue;
     const loc = formatLocation(x.jobLocation), org = typeof x.hiringOrganization === "object" ? x.hiringOrganization?.name || "" : x.hiringOrganization || "", combined = `${x.title} ${org} ${x.description || ""} ${loc}`;
     if (DANCE_RE.test(combined)) continue;
-    const geo = geographicEvidence(`${loc} ${x.description || ""}`, city, state);
-    const distance = estimateDistance(`${city}, ${state}`, loc);
+    const geo = geographicEvidence(`${loc} ${x.description || ""}`, city, state), distance = estimateDistance(`${city}, ${state}`, loc);
     if (geo.score < 45 || (distance != null && distance > radius)) continue;
-    jobs.push({ id: key(x.title, x.url || base.href), title: clean(x.title), organization: clean(org), url: abs(x.url || base.href, base), description: clean(x.description || "").slice(0, 1100), date: x.datePosted || "", closeDate: x.validThrough || "", location: loc, employmentType: clean(x.employmentType || ""), source: "JSON-LD JobPosting", score: relevanceScore(combined, interests) + geo.score, type: "job", discoveryQuality: "verified", locationScore: geo.score, distanceMiles: distance });
+    if (options.partTime && !partTimeMatch(x)) continue;
+    jobs.push({ id: key(x.title, x.url || base.href), title: clean(x.title), organization: clean(org), url: abs(x.url || base.href, base), description: clean(x.description || "").slice(0, 1100), date: x.datePosted || "", closeDate: x.validThrough || "", location: loc, employmentType: clean(x.employmentType || ""), source: options.source || "JSON-LD JobPosting", score: relevanceScore(combined, interests) + geo.score, type: "job", discoveryQuality: "verified", locationScore: geo.score, distanceMiles: distance });
   }
-  // A career link by itself is intentionally NOT accepted as a job. This is the key 3.8 change.
+  for (const m of html.matchAll(/<(h[1-4])[^>]*>([\\s\\S]*?)<\\/\\1>([\\s\\S]{0,5000}?)(?=<h[1-4][^>]*>|$)/gi)) {
+    const title = clean(m[2]), block = clean(m[3]);
+    if (!looksLikeJobTitle(title) || !block || DANCE_RE.test(`${title} ${block}`)) continue;
+    const combined = `${title} ${block}`;
+    if (CAREER_RE.test(title) && !/(part[- ]?time|full[- ]?time|hours?|salary|wage|apply|position|job)/i.test(block)) continue;
+    const geo = geographicEvidence(combined, city, state), distance = estimateDistance(`${city}, ${state}`, combined);
+    if (geo.score < 45 || (distance != null && distance > radius)) continue;
+    if (options.partTime && !/(part[- ]?time|\\b\\d{1,2}\\s*(?:-|to)\\s*\\d{1,2}\\s*hours?\\b|20\\s*hours?|32\\s*hours?|\\bpart time\\b)/i.test(combined)) continue;
+    const date = findDate(combined), url = base.href;
+    jobs.push({ id: key(title, url + "#" + date), title, organization: extractJobOrganization(combined), url, description: block.slice(0, 1100), date, closeDate: findCloseDate(combined), location: extractJobLocation(combined, city, state), employmentType: /part[- ]?time/i.test(combined) ? "Part-time" : /full[- ]?time/i.test(combined) ? "Full-time" : "", source: options.source || "validated job block", score: relevanceScore(combined, interests) + geo.score, type: "job", discoveryQuality: "verified", locationScore: geo.score, distanceMiles: distance });
+  }
   return dedupeBy(jobs, x => key(x.title, x.url));
 }
+function looksLikeJobTitle(t) { return t.length >= 5 && t.length <= 180 && !/^(view job postings|job seekers|category|keyword|home|services|about)$/i.test(t) && !EVENT_RE.test(t); }
+function partTimeMatch(x) { return /part[- ]?time|20\\s*hours?|32\\s*hours?|hourly/i.test(`${x.employmentType || ""} ${x.description || ""}`); }
+function extractJobOrganization(t) { const m=t.match(/(?:at|for)\\s+([A-Z][A-Za-z0-9&'’ .-]{2,100})(?:\\s+(?:is|has|seeks|seeking|located|in)\\b|$)/); return m ? clean(m[1]) : ""; }
+function extractJobLocation(t, city, state) { const m=t.match(new RegExp(`.{0,100}\\\\b${escapeRe(city)}\\\\b.{0,100}`, "i")); return clean(m ? m[0] : `${city}, ${state}`); }
+function findCloseDate(t) { const m=t.match(/(?:closes?|deadline|expires?|application close(?:s)?)[^\\d]{0,30}(\\b(?:20\\d{2}[-/]\\d{1,2}[-/]\d{1,2}|\\d{1,2}[/-]\\d{1,2}[/-]20\\d{2}|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\\s+\\d{1,2}(?:,\\s*20\\d{2})?))/i); return m ? m[1] : ""; }
 
 async function diagnostics(env, requestPath) {
   const cf = await fetchText("https://www.cloudflare.com/"), uj = await fetchText("https://data.usajobs.gov/api/codelist/positionscheduletypes");
