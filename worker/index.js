@@ -590,7 +590,7 @@ function findDate(t) { const m = String(t).match(/\b(?:20\d{2}[-/]\d{1,2}[-/]\d{
 function relevanceScore(text, interests) { const t = norm(text); let s = 0; for (const i of interests) { const q = norm(i); if (!q) continue; if (t.includes(q)) s += 10; for (const w of q.split(" ").filter(x => x.length > 3)) if (t.includes(w)) s += 2; } return s; }
 
 async function discoverJobs(interests, city, state, radius, partTime, env) {
-  const budget = { used: 0, limit: Number(env?.DISCOVERY_FETCH_LIMIT || 72) };
+  const budget = { used: 0, limit: Math.min(SAFE_FETCH_LIMIT, Number(env?.DISCOVERY_FETCH_LIMIT || 72)) };
   const diagnostics = [], items = [];
   let usajobsDiscovered = 0, usajobsDuplicateCount = 0, usajobsOutsideRadius = 0, usajobsUnknownDistance = 0, usajobsExcludedByFilter = 0, usajobsQueries = 0;
   const usajobsAnchorSummary = [];
