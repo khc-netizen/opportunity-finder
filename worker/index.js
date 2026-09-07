@@ -56,7 +56,7 @@ export default {
 };
 
 const VERSION = "3.9.6";
-const BUILD = "v3.9.6-neo-rls-geographic-validation";
+const BUILD = "v3.9.6-neo-rls-geographic-validation-final";
 const SEARCH_LIMIT = 10;
 const PAGE_LIMIT = 72;
 
@@ -440,8 +440,10 @@ const CITY_COORDS = {
 };
 function cityKey(text) {
   const t = norm(text);
+  const padded = ` ${t} `;
   for (const k of Object.keys(CITY_COORDS).sort((a,b) => b.length - a.length)) {
-    if (new RegExp("\b" + escapeRe(k.split(",")[0]) + "\b", "i").test(t)) return k;
+    const name = norm(k.split(",")[0]);
+    if (padded.includes(` ${name} `)) return k;
   }
   return null;
 }
@@ -457,23 +459,22 @@ function estimateDistance(home, placeText) {
   return Math.round(3958.8 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1-h)));
 }
 function geographicEvidence(text, city, state) {
-  const t = norm(text);
+  const t = norm(text), padded = ` ${t} `;
   if (/^(OH|Ohio)$/i.test(state)) {
     const hasOhio = /\bohio\b/.test(t);
     const hasOhioAbbr = /\boh\b/.test(t);
     const hasState = hasOhio || hasOhioAbbr;
-    const hasCity = city ? new RegExp("\b" + escapeRe(norm(city)) + "\b", "i").test(t) : false;
+    const hasCity = !!city && padded.includes(` ${norm(city)} `);
     const hasCountyOrRegion = /\b(?:trumbull county|trumbull|warren|northeast ohio|geauga county|geauga|portage county|portage|ashtabula county|ashtabula|mahoning county|mahoning|columbiana county|columbiana|summit county|summit|lake county|lake|cuyahoga county|cuyahoga)\b/.test(t);
     let score = 0;
-    // The city name alone is deliberately NOT local evidence because "Mesopotamia" is also an ancient region.
     if (hasState) score += 45;
     if (hasCity && hasState) score += 35;
     if (hasCountyOrRegion && hasState) score += 20;
     return { score: Math.min(100, score), hasOhio, hasOhioAbbr, hasState, hasCity, hasCountyOrRegion };
   }
   const wantedState = norm(state);
-  const hasState = wantedState && new RegExp(`\b${escapeRe(wantedState)}\b`, "i").test(t);
-  const hasCity = city ? new RegExp("\b" + escapeRe(norm(city)) + "\b", "i").test(t) : false;
+  const hasState = !!wantedState && padded.includes(` ${wantedState} `);
+  const hasCity = !!city && padded.includes(` ${norm(city)} `);
   return { score: (hasState ? 50 : 0) + (hasCity && hasState ? 50 : 0), hasState, hasCity };
 }
 function extractLocation(text, city, state) {
