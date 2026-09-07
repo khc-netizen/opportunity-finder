@@ -55,9 +55,13 @@ export default {
   }
 };
 
-const VERSION = "3.9.6";
-const BUILD = "v3.9.7-usajobs-local-parttime";
+const VERSION = "3.9.7";
+const BUILD = "v3.9.8-broader-org-discovery";
 const SEARCH_LIMIT = 10;
+const ORG_DISCOVERY_QUERY_LIMIT = 14;
+const ORG_VALIDATION_LIMIT = 18;
+const VENUE_DISCOVERY_QUERY_LIMIT = 2;
+const VENUE_VALIDATION_LIMIT = 2;
 const PAGE_LIMIT = 72;
 
 // Verified regional organizations/venues used as discovery anchors. These are organization seeds,
@@ -181,7 +185,7 @@ function localSearchSuffix(state) {
   return /^(OH|Ohio)$/i.test(state) ? ` -dance -"ancient Mesopotamia" -"Mesopotamia historical region" -Louisiana -"Church Point"` : "";
 }
 function interestBase(interests) {
-  return interests.length ? interests.slice(0, 8) : ["local history", "museums", "historical societies", "beekeeping", "blacksmithing", "reenactment", "living history", "SCA", "medieval reenactment", "traditional crafts", "nature", "native plants", "woodworking", "astronomy", "cycling", "clubs", "guilds", "sportsmen"];
+  return interests.length ? interests.slice(0, 8) : ["local history", "museums", "historical societies", "beekeeping", "blacksmithing", "reenactment", "living history", "SCA", "Society for Creative Anachronism", "shire", "guilds", "nature conservation", "astronomy", "cycling trails", "gardening horticulture", "traditional crafts", "sportsmen"];
 }
 function buildOrgQueries(interests, city, state) {
   const places = targetPlaces(city, state), cats = interestBase(interests), qs = [];
@@ -191,7 +195,7 @@ function buildOrgQueries(interests, city, state) {
     qs.push(`"${cats[i]}" ${p} (association OR society OR club OR guild OR chapter OR organization)${suffix}`);
     if (i < 5) qs.push(`${p} ("historical society" OR museum OR "nature center" OR beekeepers OR blacksmith OR reenactment OR "craft guild")${suffix}`);
   }
-  return [...new Set(qs)].slice(0, SEARCH_LIMIT);
+  return [...new Set(qs)].slice(0, ORG_DISCOVERY_QUERY_LIMIT);
 }
 function buildVenueQueries(interests, city, state) {
   const places = targetPlaces(city, state), cats = interestBase(interests), qs = [];
@@ -226,7 +230,7 @@ async function discover(interests, city, state, radius, env) {
     }
   }
 
-  const uniqueOrgUrls = dedupeCandidateUrls(orgCandidates).slice(0, 14);
+  const uniqueOrgUrls = dedupeCandidateUrls(orgCandidates).slice(0, ORG_VALIDATION_LIMIT);
   const organizations = [];
   for (const c of uniqueOrgUrls) {
     const r = await fetchText(c.url, {}, budget);
@@ -249,13 +253,13 @@ async function discover(interests, city, state, radius, env) {
   const orgs = dedupeOrganizations(organizations).slice(0, 100);
 
   // Stage 2: venues are independent discovery anchors, but use the same strict organization validation.
-  for (const query of buildVenueQueries(interests, city, state)) {
+  for (const query of buildVenueQueries(interests, city, state).slice(0, VENUE_DISCOVERY_QUERY_LIMIT)) {
     const r = await searchWeb(query, env, budget);
     diagnostics.push({ stage: "venue-search", source: "search", query, ok: r.ok, status: r.status, parser: r.parser || null, candidates: r.urls.length, milliseconds: r.milliseconds, bytes: r.bytes, error: r.ok ? null : r.error });
     for (const u of r.urls) if (acceptDiscoveryUrl(u, state)) venueCandidates.push({ url: u, query });
   }
   const venues = [];
-  for (const c of dedupeCandidateUrls(venueCandidates).slice(0, 6)) {
+  for (const c of dedupeCandidateUrls(venueCandidates).slice(0, VENUE_VALIDATION_LIMIT)) {
     const r = await fetchText(c.url, {}, budget);
     const d = { stage: "venue-validation", url: c.url, query: c.query, ok: r.ok, status: r.status, accepted: 0, rejected: null };
     if (!r.ok) { d.rejected = r.error || `HTTP ${r.status}`; diagnostics.push(d); continue; }
@@ -267,10 +271,10 @@ async function discover(interests, city, state, radius, env) {
 
   // Stage 3: trusted event sources first, then validated organization/venue anchors.
   // This makes event discovery resilient when search-engine results are sparse or noisy.
-  // Cloudflare's subrequest ceiling is lower than the configurable fetch budget.
-  // Organization/venue discovery can consume up to 36 calls, so keep event discovery
-  // capped at 14 to stay below the 50-subrequest ceiling.
-  const eventBudget = { used: 0, limit: Math.min(14, Math.max(0, budget.limit - budget.used)) };
+  // Broader organization discovery uses the saved venue budget. Keep the total
+  // organization/venue pass at roughly 36 calls and leave headroom for events under
+  // Cloudflare's observed subrequest ceiling.
+  const eventBudget = { used: 0, limit: Math.min(10, Math.max(0, budget.limit - budget.used)) };
   const events = [];
   const trustedEventSources = [...BUILTIN_EVENT_SOURCES, ...listEnv(env, "EVENT_SOURCES").map(url => ({ url, name: "configured event source" }))];
   for (const source of trustedEventSources) {
