@@ -16,6 +16,7 @@ jobs:
       - name: Check live Worker and jobs
         run: |
           set -e
+          echo 'Checking Cloudflare propagation after final worker deployment touch...'
           diag=$(curl -fsSL --max-time 30 'https://opportunity-finder-v2.khc-comm.workers.dev/test')
           echo "$diag"
           echo "$diag" | grep -q '"version": "3.9.6"'
