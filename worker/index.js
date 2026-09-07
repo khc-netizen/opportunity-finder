@@ -55,8 +55,8 @@ export default {
   }
 };
 
-const VERSION = "3.9.3";
-const BUILD = "v3.9.3-local-job-and-event-parser";
+const VERSION = "3.9.4";
+const BUILD = "v3.9.4-targeted-job-event-repair";
 const SEARCH_LIMIT = 10;
 const PAGE_LIMIT = 72;
 
@@ -494,8 +494,9 @@ function parseEvents(html, baseUrl, interests, city, state, org, radius = 75) {
   for (const m of html.matchAll(/<(article|li|div|section)[^>]*>([\s\S]*?)<\/\1>/gi)) {
     const block = clean(m[2]);
     const date = findDate(block);
+    if (/\b(?:bc|bce)\b/i.test(block) || /\b(?:solar eclipse|antipope|earl godwine|king edward|battle of arsuf)\b/i.test(block)) continue;
     if (!date || !EVENT_RE.test(block) || DANCE_RE.test(block) || AMISH_RE.test(block) || ARTICLE_RE.test(block.slice(0, 500))) continue;
-    const geo = geographicEvidence(block + " " + text.slice(0, 5000), city, state);
+    const geo = geographicEvidence(block, city, state);
     const location = extractLocation(block, city, state);
     const distance = estimateDistance(`${city}, ${state}`, location);
     if (geo.score < 45 || (distance != null && distance > radius)) continue;
@@ -505,7 +506,19 @@ function parseEvents(html, baseUrl, interests, city, state, org, radius = 75) {
   }
   if (events.length && !evidence.includes("HTML event block")) evidence.push("HTML event block");
   if (!events.length) return { events: [], evidence, rejectReason: !EVENT_RE.test(text) ? "no event-specific evidence" : "no validated local event" };
-  return { events: dedupeBy(events, x => key(x.title, x.url + x.date)), evidence, rejectReason: null };
+  return { events: dedupeEvents(events), evidence, rejectReason: null };
+}
+function dedupeEvents(items) {
+  const seen = new Map();
+  for (const item of items) {
+    const k = `${eventTitleKey(item.title)}|${norm(item.date || "")}|${norm(item.location || "")}`;
+    const old = seen.get(k);
+    if (!old || (item.source === "JSON-LD Event" && old.source !== "JSON-LD Event")) seen.set(k, item);
+  }
+  return [...seen.values()];
+}
+function eventTitleKey(title) {
+  return norm(title).replace(/^(?:sun|mon|tue|wed|thu|fri|sat)\s+\d{1,2}\s+/i, "").replace(/\bfeatured\b/g, "").replace(/\b20\d{2}\b/g, "").replace(/\b(?:century village museum|auburn church)\b/g, "").replace(/\s+/g, " ").trim();
 }
 function flattenJsonLd(x) { if (Array.isArray(x)) return x.flatMap(flattenJsonLd); if (x && typeof x === "object") return [x, ...(Array.isArray(x["@graph"]) ? x["@graph"].flatMap(flattenJsonLd) : [])]; return []; }
 function formatLocation(x) {
@@ -597,6 +610,17 @@ function parseJobs(html, baseUrl, interests, city, state, radius = 30, options =
     if (options.partTime && !/(part[- ]?time|\b\d{1,2}\s*(?:-|to)\s*\d{1,2}\s*hours?\b|20\s*hours?|32\s*hours?|\bpart time\b)/i.test(combined)) continue;
     const date = findDate(combined), url = base.href;
     jobs.push({ id: key(title, url + "#" + date), title, organization: extractJobOrganization(combined), url, description: block.slice(0, 1100), date, closeDate: findCloseDate(combined), location: extractJobLocation(combined, city, state), employmentType: /part[- ]?time/i.test(combined) ? "Part-time" : /full[- ]?time/i.test(combined) ? "Full-time" : "", source: options.source || "validated job block", score: relevanceScore(combined, interests) + geo.score, type: "job", discoveryQuality: "verified", locationScore: geo.score, distanceMiles: distance });
+  }
+  for (const m of html.matchAll(/<a[^>]+href=["']([^"']+)["'][^>]*>\s*([^<]{5,180})\s*<\/a>([\s\S]{0,7000}?)(?:Read More|(?=<a[^>]+href=["']))/gi)) {
+    const title=clean(m[2]), block=clean(m[3]);
+    if (!looksLikeJobTitle(title) || !block) continue;
+    const combined=`${title} ${block}`;
+    if (DANCE_RE.test(combined) || AMISH_RE.test(combined)) continue;
+    if (options.partTime && !/(part[- ]?time|\b\d{1,2}\s*(?:-|to)\s*\d{1,2}\s*hours?\b|20\s*hours?|32\s*hours?|hourly)/i.test(combined)) continue;
+    const geo=geographicEvidence(combined,city,state), distance=estimateDistance(`${city}, ${state}`,combined), localByCity=!!cityKey(combined);
+    if ((geo.score<45 && !(trusted && localByCity)) || (distance!=null && distance>radius)) continue;
+    const date=findDate(combined), url=abs(m[1],base);
+    jobs.push({id:key(title,url+"#"+date),title,organization:extractJobOrganization(combined),url,description:block.slice(0,1100),date,closeDate:findCloseDate(combined),location:extractJobLocation(combined,city,state),employmentType:/part[- ]?time/i.test(combined)?"Part-time":/full[- ]?time/i.test(combined)?"Full-time":"",source:options.source||"validated job block",score:relevanceScore(combined,interests)+geo.score,type:"job",discoveryQuality:"verified",locationScore:geo.score,distanceMiles:distance});
   }
   return dedupeBy(jobs, x => key(x.title, x.url));
 }
