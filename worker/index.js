@@ -354,7 +354,7 @@ function parseOrganizationPage(html, baseUrl, interests, city, state, venueMode 
   const localEvidence = geographicEvidence(combined, city, state);
   const distance = estimateDistance(`${city}, ${state}`, `${structuredText} ${text.slice(0, 12000)}`);
   if (distance != null && distance > radius) return { organizations: [], evidence, rejectReason: `outside requested radius (${distance} mi)` };
-  if (hardOutOfArea(combined, city, state) && !new RegExp("\\b" + escapeRe(city) + "\\b", "i").test(combined)) return { organizations: [], evidence, rejectReason: "page contains a contradictory out-of-area location" };
+  if (hardOutOfArea(combined, city, state) && !new RegExp("\b" + escapeRe(city) + "\b", "i").test(combined)) return { organizations: [], evidence, rejectReason: "page contains a contradictory out-of-area location" };
   if (!validIdentityEvidence || localEvidence.score < 45) {
     return { organizations: [], evidence, rejectReason: !validIdentityEvidence ? "insufficient organization/venue evidence" : "insufficient geographic evidence" };
   }
@@ -441,7 +441,7 @@ const CITY_COORDS = {
 function cityKey(text) {
   const t = norm(text);
   for (const k of Object.keys(CITY_COORDS).sort((a,b) => b.length - a.length)) {
-    if (new RegExp("\\b" + escapeRe(k.split(",")[0]) + "\\b", "i").test(t)) return k;
+    if (new RegExp("\b" + escapeRe(k.split(",")[0]) + "\b", "i").test(t)) return k;
   }
   return null;
 }
@@ -462,7 +462,7 @@ function geographicEvidence(text, city, state) {
     const hasOhio = /\bohio\b/.test(t);
     const hasOhioAbbr = /\boh\b/.test(t);
     const hasState = hasOhio || hasOhioAbbr;
-    const hasCity = city ? new RegExp("\\b" + escapeRe(norm(city)) + "\\b", "i").test(t) : false;
+    const hasCity = city ? new RegExp("\b" + escapeRe(norm(city)) + "\b", "i").test(t) : false;
     const hasCountyOrRegion = /\b(?:trumbull county|trumbull|warren|northeast ohio|geauga county|geauga|portage county|portage|ashtabula county|ashtabula|mahoning county|mahoning|columbiana county|columbiana|summit county|summit|lake county|lake|cuyahoga county|cuyahoga)\b/.test(t);
     let score = 0;
     // The city name alone is deliberately NOT local evidence because "Mesopotamia" is also an ancient region.
@@ -473,11 +473,11 @@ function geographicEvidence(text, city, state) {
   }
   const wantedState = norm(state);
   const hasState = wantedState && new RegExp(`\b${escapeRe(wantedState)}\b`, "i").test(t);
-  const hasCity = city ? new RegExp("\\b" + escapeRe(norm(city)) + "\\b", "i").test(t) : false;
+  const hasCity = city ? new RegExp("\b" + escapeRe(norm(city)) + "\b", "i").test(t) : false;
   return { score: (hasState ? 50 : 0) + (hasCity && hasState ? 50 : 0), hasState, hasCity };
 }
 function extractLocation(text, city, state) {
-  const m = text.match(new RegExp(".{0,80}\\b" + escapeRe(city) + "\\b.{0,80}", "i"));
+  const m = text.match(new RegExp(".{0,80}\b" + escapeRe(city) + "\b.{0,80}", "i"));
   return clean(m ? m[0] : `${city}, ${state}`);
 }
 function escapeRe(s) { return String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
