@@ -74,7 +74,7 @@ const BUILTIN_EVENT_SOURCES = [
   { url: "https://centuryvillagemuseum.org/events-calendar/", name: "Century Village Museum" }
 ];
 const DANCE_RE = /\bdance\b|dancing|ballroom|ballet|tap dance|jazz dance|dance studio|dance academy/i;
-const JUNK_HOST_RE = /(?:facebook|instagram|linkedin|youtube|tiktok|pinterest|x\.com|twitter|wikipedia|yelp|tripadvisor)\./i;
+const JUNK_HOST_RE = /(?:facebook|instagram|linkedin|youtube|tiktok|pinterest|x\.com|twitter|wikipedia|yelp|tripadvisor|google|googleusercontent|googleapis|classroom|drive|accounts|menards|usps|17track|fedex)\./i;
 const FOREIGN_GOV_HOST_RE = /(?:^|\.)(?:gov|gouv|government|gc|ac)\.(?:co|uk|au|nz|ca|in|pk|bd|za|ng|ke|br|mx|fr|de|es|it|nl|be|ch|at|pl|se|no|dk|fi|jp|kr|sg|my|ph|id|th|vn)$/i;
 const ARTICLE_RE = /\b(?:news|newspaper|journalism|press release|obituary|podcast|radio|weather|scoreboard|politics|election|recipe|restaurant review|blog post)\b/i;
 const AMISH_RE = /\bamish\b|\bamish[- ]owned\b|\bamish[- ]run\b/i;
@@ -172,9 +172,12 @@ function decodeSearchUrl(href) {
 
 function targetPlaces(city, state) {
   if (/^(OH|Ohio)$/i.test(state)) return [
-    `"${city}" Ohio`, `"Trumbull County" Ohio`, `"Warren" Ohio`, `"Northeast Ohio"`, `"Geauga County" Ohio`, `"Portage County" Ohio`, `"Ashtabula County" Ohio`, `"Mahoning County" Ohio`
+    `"${city}" "Trumbull County" Ohio`, `"Trumbull County" Ohio`, `"Warren" "Trumbull County" Ohio`, `"Northeast Ohio"`, `"Geauga County" Ohio`, `"Portage County" Ohio`, `"Ashtabula County" Ohio`, `"Mahoning County" Ohio`
   ];
   return [`"${city}" "${state}"`, `"${state}"`];
+}
+function localSearchSuffix(state) {
+  return /^(OH|Ohio)$/i.test(state) ? ` -dance -"ancient Mesopotamia" -"Mesopotamia historical region" -Louisiana -"Church Point"` : "";
 }
 function interestBase(interests) {
   return interests.length ? interests.slice(0, 8) : ["local history", "museums", "historical societies", "beekeeping", "blacksmithing", "reenactment", "traditional crafts", "nature", "native plants", "woodworking", "astronomy", "cycling", "clubs", "guilds"];
@@ -183,8 +186,9 @@ function buildOrgQueries(interests, city, state) {
   const places = targetPlaces(city, state), cats = interestBase(interests), qs = [];
   for (let i = 0; i < Math.min(10, cats.length); i++) {
     const p = places[i % places.length];
-    qs.push(`"${cats[i]}" ${p} Ohio (association OR society OR club OR guild OR chapter OR organization) -dance`);
-    if (i < 5) qs.push(`${p} ("historical society" OR museum OR "nature center" OR beekeepers OR blacksmith OR reenactment OR "craft guild") -dance`);
+    const suffix = localSearchSuffix(state);
+    qs.push(`"${cats[i]}" ${p} Ohio (association OR society OR club OR guild OR chapter OR organization)${suffix}`);
+    if (i < 5) qs.push(`${p} ("historical society" OR museum OR "nature center" OR beekeepers OR blacksmith OR reenactment OR "craft guild")${suffix}`);
   }
   return [...new Set(qs)].slice(0, SEARCH_LIMIT);
 }
@@ -192,7 +196,7 @@ function buildVenueQueries(interests, city, state) {
   const places = targetPlaces(city, state), cats = interestBase(interests), qs = [];
   for (let i = 0; i < Math.min(6, cats.length); i++) {
     const p = places[i % places.length];
-    qs.push(`${p} "${cats[i]}" (museum OR library OR "historic site" OR "nature center" OR fairgrounds OR observatory OR "community center") -dance`);
+    qs.push(`${p} "${cats[i]}" (museum OR library OR "historic site" OR "nature center" OR fairgrounds OR observatory OR "community center")${localSearchSuffix(state)}`);
   }
   return [...new Set(qs)].slice(0, 6);
 }
@@ -209,7 +213,7 @@ async function discover(interests, city, state, radius, env) {
   // Put trusted local seeds first so generic search-engine articles cannot consume the validation budget.
   const orgCandidates = [...BUILTIN_DISCOVERY_SEEDS, ...listEnv(env, "GROUP_SEEDS"), ...listEnv(env, "DISCOVERY_SEEDS")]
     .filter(u => acceptDiscoveryUrl(u, state))
-    .map(u => ({ url: u, query: "trusted discovery seed" }));
+    .map(u => ({ url: u, query: "trusted discovery seed", trusted: true }));
   const orgQueries = buildOrgQueries(interests, city, state);
 
   // Stage 1: discover organizations first. Search results are never returned directly.
@@ -229,6 +233,15 @@ async function discover(interests, city, state, radius, env) {
     if (!r.ok) { d.rejected = r.error || `HTTP ${r.status}`; diagnostics.push(d); continue; }
     const page = parseOrganizationPage(r.text, c.url, interests, city, state, false, radius);
     d.evidence = page.evidence; d.accepted = page.organizations.length; d.rejected = page.organizations.length ? null : page.rejectReason;
+    if (!page.organizations.length && c.trusted) {
+      const trustedName = trustedSeedName(c.url);
+      organizations.push({
+        id: key(trustedName, c.url), name: trustedName, url: c.url, description: "Verified local discovery seed.",
+        type: classifyOrg(trustedName), confidence: 95, score: 95, location: `${city}, ${state}`,
+        source: "trusted discovery seed", discoveryQuality: "verified", locationScore: 65, distanceMiles: null
+      });
+      d.accepted = 1; d.rejected = null; d.evidence = [...d.evidence, "trusted-seed-fallback"];
+    }
     diagnostics.push(d); organizations.push(...page.organizations);
   }
 
@@ -253,7 +266,10 @@ async function discover(interests, city, state, radius, env) {
 
   // Stage 3: trusted event sources first, then validated organization/venue anchors.
   // This makes event discovery resilient when search-engine results are sparse or noisy.
-  const eventBudget = { used: 0, limit: Math.min(24, Math.max(0, budget.limit - budget.used)) };
+  // Cloudflare's subrequest ceiling is lower than the configurable fetch budget.
+  // Organization/venue discovery can consume up to 36 calls, so keep event discovery
+  // capped at 14 to stay below the 50-subrequest ceiling.
+  const eventBudget = { used: 0, limit: Math.min(14, Math.max(0, budget.limit - budget.used)) };
   const events = [];
   const trustedEventSources = [...BUILTIN_EVENT_SOURCES, ...listEnv(env, "EVENT_SOURCES").map(url => ({ url, name: "configured event source" }))];
   for (const source of trustedEventSources) {
@@ -307,6 +323,15 @@ async function discover(interests, city, state, radius, env) {
   };
 }
 
+function trustedSeedName(url) {
+  const h = String(url || "").toLowerCase();
+  if (h.includes("trumbullbeekeepers.org")) return "Trumbull Beekeepers";
+  if (h.includes("wraba.com")) return "Western Reserve Artist Blacksmith Association";
+  if (h.includes("centuryvillagemuseum.org")) return "Century Village Museum";
+  if (h.includes("trumbullcountyhistory.com")) return "Trumbull County Historical Society";
+  if (h.includes("trumbullcountyhistory.org/trumbull-history-hub")) return "Trumbull History Hub";
+  try { return humanizeHostname(new URL(url).hostname).replace(/\b\w/g, c => c.toUpperCase()); } catch { return "Trusted local organization"; }
+}
 function acceptDiscoveryUrl(u, state) {
   if (!isHttp(u)) return false;
   try {
