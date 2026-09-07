@@ -1,0 +1,28 @@
+name: Verify 3.9.6 final deployment
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-3.9.6-final.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check live Worker and jobs
+        run: |
+          set -e
+          diag=$(curl -fsSL --max-time 30 'https://opportunity-finder-v2.khc-comm.workers.dev/test')
+          echo "$diag"
+          echo "$diag" | grep -q '"version": "3.9.6"'
+          echo "$diag" | grep -q 'neo-rls-geographic-validation-final'
+          curl -fsSL --max-time 90 -o /tmp/jobs.json 'https://opportunity-finder-v2.khc-comm.workers.dev/jobs?interests=museum%2Cartifact%20conservation%2Chistoric%20preservation%2Carchaeology%2Cbike%20mechanic%2Cwelding%2Cfabrication%2Cwoodworking%2Cartisan%2Ccrafts&home=Mesopotamia%2C%20Ohio&city=Mesopotamia&state=OH&radius=30&partTime=true'
+          cat /tmp/jobs.json
+          grep -q 'NEO-RLS' /tmp/jobs.json
+          ! grep -q 'JOBLine' /tmp/jobs.json
+          grep -q 'Warren' /tmp/jobs.json
+          echo 'FINAL LIVE VERIFICATION PASSED'
