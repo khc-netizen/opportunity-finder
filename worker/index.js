@@ -55,8 +55,8 @@ export default {
   }
 };
 
-const VERSION = "3.9.4";
-const BUILD = "v3.9.4-targeted-job-event-repair";
+const VERSION = "3.9.5";
+const BUILD = "v3.9.5-source-specific-job-event-repair";
 const SEARCH_LIMIT = 10;
 const PAGE_LIMIT = 72;
 
@@ -97,7 +97,16 @@ function errorMessage(e) { return e instanceof Error ? (e.message || String(e)) 
 function json(data, cors, status = 200) { return new Response(JSON.stringify(data, null, 2), { status, headers: { "Content-Type": "application/json; charset=utf-8", ...cors } }); }
 function clamp(n, min, max) { return Math.min(Math.max(Number.isFinite(n) ? n : min, min), max); }
 function norm(s) { return String(s || "").toLowerCase().replace(/https?:\/\//g, "").replace(/[^a-z0-9]+/g, " ").trim(); }
-function clean(s) { return stripHtml(String(s || "")).replace(/\s+/g, " ").trim(); }
+function decodeEntities(s) {
+  return String(s || "").replace(/&nbsp;|&#160;/gi, " ")
+    .replace(/&amp;|&#38;|&#038;/gi, "&")
+    .replace(/&lt;/gi, "<").replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"').replace(/&apos;|&#39;|&#x27;/gi, "'")
+    .replace(/&#x2f;|&#47;/gi, "/")
+    .replace(/&#(\d+);/g, (_, n) => { const c = Number(n); return c >= 0 && c <= 0x10ffff ? String.fromCodePoint(c) : _; })
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => { const c = parseInt(n, 16); return c >= 0 && c <= 0x10ffff ? String.fromCodePoint(c) : _; });
+}
+function clean(s) { return stripHtml(decodeEntities(String(s || ""))).replace(/\s+/g, " ").trim(); }
 function stripHtml(s) { return String(s || "").replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]*>/g, " ").replace(/&amp;/gi, "&").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&quot;/gi, '"').replace(/&#39;|&#x27;/gi, "'").replace(/&#x2F;/gi, "/"); }
 function decodeHtml(s) { return clean(s); }
 function isHttp(u) { try { return /^https?:$/.test(new URL(u).protocol); } catch { return false; } }
@@ -484,12 +493,12 @@ function parseEvents(html, baseUrl, interests, city, state, org, radius = 75) {
     if (!/Event/i.test(type) || !x.name) continue;
     const location = formatLocation(x.location), combined = `${x.name} ${x.description || ""} ${location} ${typeof x.organizer === "object" ? x.organizer?.name || "" : x.organizer || ""}`;
     if (DANCE_RE.test(combined) || AMISH_RE.test(combined)) continue;
-    const geo = geographicEvidence(combined + " " + text.slice(0, 8000), city, state);
+    const geo = geographicEvidence(combined, city, state);
     const distance = estimateDistance(`${city}, ${state}`, location);
     if (geo.score < 45 || (distance != null && distance > radius)) continue;
     events.push({ id: key(x.name, x.url || base.href), title: clean(x.name), description: clean(x.description || "").slice(0, 1000), url: abs(x.url || base.href, base), date: x.startDate, endDate: x.endDate || "", location, organizer: clean(typeof x.organizer === "object" ? x.organizer?.name || org.name : x.organizer || org.name), source: "JSON-LD Event", score: relevanceScore(combined, interests) + geo.score, type: "event", discoveryQuality: "verified", locationScore: geo.score, distanceMiles: distance, distance, org: org.name, host: org.name });
   }
-  if (events.length) evidence.push("JSON-LD Event");
+  if (events.length) { evidence.push("JSON-LD Event"); return { events: dedupeEvents(events), evidence, rejectReason: null }; }
 
   for (const m of html.matchAll(/<(article|li|div|section)[^>]*>([\s\S]*?)<\/\1>/gi)) {
     const block = clean(m[2]);
@@ -500,18 +509,24 @@ function parseEvents(html, baseUrl, interests, city, state, org, radius = 75) {
     const location = extractLocation(block, city, state);
     const distance = estimateDistance(`${city}, ${state}`, location);
     if (geo.score < 45 || (distance != null && distance > radius)) continue;
-    const h = clean((m[1].match(/<h[1-4][^>]*>([\s\S]*?)<\/h[1-4]>/i) || [])[1] || block.slice(0, 160));
-    if (h.length < 4) continue;
+    const h = clean((m[1].match(/<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/i) || [])[1] || block.slice(0, 160));
+    if (h.length < 4 || isGarbageEventTitle(h)) continue;
     events.push({ id: key(h, base.href + "#" + date), title: h, description: block.slice(0, 1000), url: base.href, date, endDate: "", location, organizer: org.name, source: "validated event block", score: relevanceScore(block, interests) + geo.score, type: "event", discoveryQuality: "verified", locationScore: geo.score, distanceMiles: distance, distance, org: org.name, host: org.name });
   }
   if (events.length && !evidence.includes("HTML event block")) evidence.push("HTML event block");
   if (!events.length) return { events: [], evidence, rejectReason: !EVENT_RE.test(text) ? "no event-specific evidence" : "no validated local event" };
   return { events: dedupeEvents(events), evidence, rejectReason: null };
 }
+function isGarbageEventTitle(title) {
+  const t = norm(title);
+  return /^(?:events? from|upcoming events?|events search|search|today|calendar|winter spring|summer|fall|holiday season|skip to content|skip to footer)/i.test(t)
+    || /(?:skip to content|skip to footer|the museum is open|special exhibits.*all year)/i.test(t)
+    || /^(?:sun|mon|tue|wed|thu|fri|sat)\s+\d{1,2}\s+/.test(t) && /\bfeatured\b/.test(t) && t.length > 140;
+}
 function dedupeEvents(items) {
   const seen = new Map();
   for (const item of items) {
-    const k = `${eventTitleKey(item.title)}|${norm(item.date || "")}|${norm(item.location || "")}`;
+    const k = `${eventTitleKey(item.title)}|${norm(item.location || "")}`;
     const old = seen.get(k);
     if (!old || (item.source === "JSON-LD Event" && old.source !== "JSON-LD Event")) seen.set(k, item);
   }
@@ -540,7 +555,7 @@ async function discoverJobs(interests, city, state, radius, partTime, env) {
     const r = await fetchText(source, {}, budget);
     const d = { stage: "trusted-job-source", url: source, ok: r.ok, status: r.status, accepted: 0, rejected: null };
     if (!r.ok) { d.rejected = r.error || `HTTP ${r.status}`; diagnostics.push(d); continue; }
-    const found = parseJobs(r.text, source, interests, city, state, radius, { source: source.includes("neo-rls.org") ? "NEO-RLS" : "trusted job source", partTime });
+    const found = /neo-rls\.org/i.test(source) ? parseNeoRlsJobs(r.text, source, interests, city, state, radius, { source: "NEO-RLS", partTime }) : parseJobs(r.text, source, interests, city, state, radius, { source: "trusted job source", partTime });
     d.accepted = found.length; d.rejected = found.length ? null : "no validated local jobs from trusted source";
     diagnostics.push(d); items.push(...found);
   }
@@ -586,6 +601,40 @@ async function discoverJobs(interests, city, state, radius, partTime, env) {
 }
 function buildJobQueries(interests, city, state) { const base = interestBase(interests).slice(0, 6), p = `"${city}" ${state}`; return [...new Set(base.map(x => `"${x}" ${p} (jobs OR careers OR employment OR hiring) -dance`))].slice(0, 6); }
 function buildUSAQueries(interests) { const src = interests.length ? interests : ["museum archaeology historic preservation", "welder fabrication woodworking", "bicycle mechanic", "parks recreation cultural resources"]; return [...new Set(src)].slice(0, 4); }
+function parseNeoRlsJobs(html, baseUrl, interests, city, state, radius = 30, options = {}) {
+  const base = new URL(baseUrl), jobs = [];
+  for (const m of html.matchAll(/<h2[^>]*>([\s\S]*?)<\/h2>([\s\S]{0,12000}?)(?=<h2[^>]*>|$)/gi)) {
+    const title = clean(m[1]), block = clean(m[2]);
+    if (!looksLikeJobTitle(title) || !block) continue;
+    const combined = `${title} ${block}`;
+    if (DANCE_RE.test(combined) || AMISH_RE.test(combined)) continue;
+    if (/^(?:view job postings|job seekers|category|keyword|jobline|home)$/i.test(title)) continue;
+    if (options.partTime && !/(part[- ]?time|\b\d{1,2}\s*(?:-|to)\s*\d{1,2}\s*hours?\b|\b(?:15|16|18|20|24|25|30|32)\s*hours?\b|hourly)/i.test(combined)) continue;
+    const geo = geographicEvidence(combined, city, state);
+    const distance = estimateDistance(`${city}, ${state}`, combined);
+    if (geo.score < 45 || (distance != null && distance > radius)) continue;
+    const link = (m[2].match(/<a[^>]+href=["']([^"']+)["'][^>]*>\s*Read More/i) || [])[1];
+    const url = abs(link || base.href, base);
+    jobs.push({
+      id: key(title, url),
+      title,
+      organization: extractJobOrganization(combined),
+      url,
+      description: block.slice(0, 1100),
+      date: findDate(combined),
+      closeDate: findCloseDate(combined),
+      location: extractJobLocation(combined, city, state),
+      employmentType: /part[- ]?time/i.test(combined) ? "Part-time" : /full[- ]?time/i.test(combined) ? "Full-time" : "",
+      source: "NEO-RLS",
+      score: relevanceScore(combined, interests) + geo.score,
+      type: "job",
+      discoveryQuality: "verified",
+      locationScore: geo.score,
+      distanceMiles: distance
+    });
+  }
+  return dedupeBy(jobs, x => key(x.title, x.url));
+}
 function parseJobs(html, baseUrl, interests, city, state, radius = 30, options = {}) {
   const base = new URL(baseUrl), text = clean(html), jobs = [], jsonld = [];
   const trusted = /neo-rls\.org/i.test(base.hostname) || /trusted job source/i.test(options.source || "");
@@ -636,5 +685,5 @@ async function diagnostics(env, requestPath) {
   return { diagnostic: true, version: VERSION, build: BUILD, requestPath, architecture: "organization-first", secretBindings: { USAJOBS_KEY: keyPresent, USAJOBS_EMAIL: emailPresent }, connectivity: { Cloudflare: { ok: cf.ok, status: cf.status }, USAJOBS: { ok: uj.ok, status: uj.status } }, configuredFeeds: listEnv(env, "WORKER_FEEDS").length };
 }
 
-export { parseOrganizationPage, parseEvents, parseJobs, geographicEvidence, estimateDistance, parseHomeLocation };
-// Cloudflare deployment verification touch — validated 3.9.3 worker.
+export { parseOrganizationPage, parseEvents, parseJobs, parseNeoRlsJobs, geographicEvidence, estimateDistance, parseHomeLocation };
+// Cloudflare deployment verification touch — validated 3.9.5 source-specific parsers.
