@@ -35,10 +35,6 @@ jobs:
               '  return [...new Set(qs)].slice(0, ORG_DISCOVERY_QUERY_LIMIT);\n}\nfunction buildVenueQueries(interests, city, state) {'
             ),
             (
-              '    "cultural resources museum historic preservation archaeology"\n  ];',
-              '    "cultural resources museum historic preservation archaeology"\n  ];'
-            ),
-            (
               '  const uniqueOrgUrls = dedupeCandidateUrls(orgCandidates).slice(0, 14);',
               '  const uniqueOrgUrls = dedupeCandidateUrls(orgCandidates).slice(0, ORG_VALIDATION_LIMIT);'
             ),
@@ -87,3 +83,5 @@ jobs:
           git add worker/index.js .github/workflows/patch-org-discovery.yml
           git commit -m "Broaden local organization discovery"
           git push origin HEAD:fix/broader-org-discovery
+
+# trigger
