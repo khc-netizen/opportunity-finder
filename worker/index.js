@@ -613,3 +613,4 @@ async function diagnostics(env, requestPath) {
 }
 
 export { parseOrganizationPage, parseEvents, parseJobs, geographicEvidence, estimateDistance, parseHomeLocation };
+// Cloudflare deployment verification touch — validated 3.9.3 worker.
