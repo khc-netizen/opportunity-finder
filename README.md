@@ -1,2 +1,1 @@
-# opportunity-finder
-Personal Opportunity Finder — events, groups, and jobs
+Opportunity Finder — Phase 3.8
