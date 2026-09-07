@@ -27,7 +27,7 @@ jobs:
           s = path.read_text()
 
           def once(pattern, replacement, label, flags=0):
-              nonlocal s
+              global s
               s2, n = re.subn(pattern, replacement, s, count=1, flags=flags)
               if n != 1:
                   raise SystemExit(f"Expected exactly one match for {label}, got {n}")
@@ -70,9 +70,9 @@ jobs:
 
       - name: Commit patch and remove temporary workflow
         run: |
-          rm -f .github/workflows/patch-org-discovery.yml
+          rm -f .github/workflows/patch-org-discovery.yml PR9_TRIGGER.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add worker/index.js .github/workflows/patch-org-discovery.yml
+          git add worker/index.js .github/workflows/patch-org-discovery.yml PR9_TRIGGER.txt
           git commit -m "Broaden local organization discovery"
           git push origin HEAD:fix/broader-org-discovery
