@@ -56,7 +56,7 @@ export default {
 };
 
 const VERSION = "3.9.6";
-const BUILD = "v3.9.6-neo-rls-geographic-validation-final";
+const BUILD = "v3.9.6-neo-rls-geographic-validation-final2";
 const SEARCH_LIMIT = 10;
 const PAGE_LIMIT = 72;
 
