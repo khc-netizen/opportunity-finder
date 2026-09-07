@@ -12,22 +12,51 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Remove unsupported job condition
+      - name: Apply validated worker patch
         shell: bash
         run: |
-          if [ ! -f .github/patch-3.9.3.flag ]; then exit 0; fi
+          if [ ! -f .github/patch-3.9.3.flag ]; then echo "No patch flag; nothing to do."; exit 0; fi
           python3 - <<'PY'
           from pathlib import Path
-          p = Path('.github/workflows/patch-3.9.3.yml')
-          s = p.read_text()
-          expr = '    if: ' + chr(36) + '{{ hashFiles(\'.github/patch-3.9.3.flag\') != \'\' }}\n'
-          if expr in s:
-              s = s.replace(expr, '', 1)
-              p.write_text(s)
+          p=Path('worker/index.js')
+          s=p.read_text()
+          s=s.replace('const VERSION = "3.9.1";','const VERSION = "3.9.3";',1)
+          s=s.replace('const BUILD = "v3.9.1-jobs-source-priority";','const BUILD = "v3.9.3-local-job-and-event-parser";',1)
+          if 'const AMISH_RE =' not in s:
+              s=s.replace('const CAREER_RE =','const AMISH_RE = /\\bamish\\b|\\bamish[- ]owned\\b|\\bamish[- ]run\\b/i;\nconst CAREER_RE =',1)
+          start=s.index('function parseEvents('); end=s.index('\nasync function diagnostics(',start); mid=s[start:end]
+          for a,b in [(r'application\\/ld\\+json',r'application\/ld\+json'),(r'<\\/script>',r'<\/script>'),(r'\\s',r'\s'),(r'\\1',r'\1')]: mid=mid.replace(a,b)
+          mid=mid.replace('if (DANCE_RE.test(combined)) continue;','if (DANCE_RE.test(combined) || AMISH_RE.test(combined)) continue;')
+          mid=mid.replace('DANCE_RE.test(block) || ARTICLE_RE.test','DANCE_RE.test(block) || AMISH_RE.test(block) || ARTICLE_RE.test')
+          mid=mid.replace('<h[1-4][^>]*>','<h[1-6][^>]*>').replace('</h[1-4]>','</h[1-6]>')
+          s=s[:start]+mid+s[end:]
+          start=s.index('function parseJobs('); end=s.index('\nasync function diagnostics(',start); mid=s[start:end]
+          for a,b in [(r'application\\/ld\\+json',r'application\/ld\+json'),(r'<\\/script>',r'<\/script>'),(r'\\s',r'\s'),(r'\\1',r'\1')]: mid=mid.replace(a,b)
+          if 'const trusted =' not in mid:
+              mid=mid.replace('const base = new URL(baseUrl), text = clean(html), jobs = [], jsonld = [];','const base = new URL(baseUrl), text = clean(html), jobs = [], jsonld = [];\n  const trusted = /neo-rls\\.org/i.test(base.hostname) || /trusted job source/i.test(options.source || "");',1)
+          mid=mid.replace('const geo = geographicEvidence(`${loc} ${x.description || ""}`, city, state), distance = estimateDistance(`${city}, ${state}`, loc);','const geo = geographicEvidence(`${loc} ${x.description || ""}`, city, state), distance = estimateDistance(`${city}, ${state}`, loc), localByCity = !!cityKey(loc);',1)
+          mid=mid.replace('if (geo.score < 45 || (distance != null && distance > radius)) continue;','if ((geo.score < 45 && !(trusted && localByCity)) || (distance != null && distance > radius)) continue;',1)
+          mid=mid.replace('const geo = geographicEvidence(combined, city, state), distance = estimateDistance(`${city}, ${state}`, combined);','const geo = geographicEvidence(combined, city, state), distance = estimateDistance(`${city}, ${state}`, combined), localByCity = !!cityKey(combined);',1)
+          mid=mid.replace('if (geo.score < 45 || (distance != null && distance > radius)) continue;','if ((geo.score < 45 && !(trusted && localByCity)) || (distance != null && distance > radius)) continue;',1)
+          mid=mid.replace('DANCE_RE.test(`${title} ${block}`)','DANCE_RE.test(`${title} ${block}`) || AMISH_RE.test(`${title} ${block}`)')
+          mid=mid.replace('<h[1-4][^>]*>','<h[1-6][^>]*>').replace('</h[1-4]>','</h[1-6]>')
+          s=s[:start]+mid+s[end:]
+          p.write_text(s)
           PY
+          node --check worker/index.js
+          node --input-type=module <<'NODE'
+          import { parseEvents, parseJobs } from './worker/index.js';
+          const eventHtml = '<html><body><h1>Events Calendar</h1><div><h4>Light Up The Night Balloon Festival</h4><div>September 11 2026</div><div>Century Village Museum, Burton, OH 44021</div></div></body></html>';
+          const e = parseEvents(eventHtml,'https://centuryvillagemuseum.org/events-calendar/',['museums'],'Mesopotamia','OH',{name:'Century Village Museum'},75);
+          if (!e.events.length) throw new Error('event parser validation failed');
+          const jobHtml = '<html><body><h2>Delivery Driver (Part Time) - Warren-Trumbull County Public Library</h2><div>This part-time position is in Warren, Ohio. Apply now.</div><h2>Building Maintenance Worker (Part Time) - Warren-Trumbull County Public Library</h2><div>Part-time position in Warren, OH.</div></body></html>';
+          const j = parseJobs(jobHtml,'https://www.neo-rls.org/view_job_postings.php',['library'],'Mesopotamia','OH',30,{source:'NEO-RLS',partTime:true});
+          if (j.length < 2) throw new Error('job parser validation failed');
+          console.log('3.9.3 validation passed',{events:e.events.length,jobs:j.length});
+          NODE
+          rm -f .github/patch-3.9.3.flag
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .github/workflows/patch-3.9.3.yml
-          git diff --cached --quiet && exit 0
-          git commit -m "fix: remove unsupported patch job condition"
+          git add worker/index.js .github/patch-3.9.3.flag
+          git commit -m "feat: strengthen local event and job parsing"
           git push
