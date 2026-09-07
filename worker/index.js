@@ -550,6 +550,8 @@ function relevanceScore(text, interests) { const t = norm(text); let s = 0; for 
 async function discoverJobs(interests, city, state, radius, partTime, env) {
   const budget = { used: 0, limit: Number(env?.DISCOVERY_FETCH_LIMIT || 72) };
   const diagnostics = [], items = [];
+  let usajobsDiscovered = 0, usajobsDuplicateCount = 0, usajobsOutsideRadius = 0, usajobsUnknownDistance = 0, usajobsExcludedByFilter = 0, usajobsQueries = 0;
+  const usajobsAnchorSummary = [];
   const trustedSources = ["https://www.neo-rls.org/view_job_postings.php", ...listEnv(env, "JOB_SOURCES")];
   for (const source of [...new Set(trustedSources)]) {
     if (budget.used >= budget.limit) break;
@@ -560,28 +562,81 @@ async function discoverJobs(interests, city, state, radius, partTime, env) {
     d.accepted = found.length; d.rejected = found.length ? null : "no validated local jobs from trusted source";
     diagnostics.push(d); items.push(...found);
   }
-  for (const query of buildUSAQueries(interests)) {
-    if (budget.used >= budget.limit) break;
-    const url = new URL("https://data.usajobs.gov/api/search");
-    url.searchParams.set("Keyword", query); const usaLocation = /^(Mesopotamia)$/i.test(city) && /^(OH|Ohio)$/i.test(state) ? "Mesopotamia, Ohio;Warren, Ohio" : `${city}, ${state}`; url.searchParams.set("LocationName", usaLocation); url.searchParams.set("Radius", String(radius)); url.searchParams.set("ResultsPerPage", "20"); if (partTime) url.searchParams.set("PositionScheduleTypeCode", "2");
-    const headers = {};
-    if (env?.USAJOBS_KEY) headers["Authorization-Key"] = env.USAJOBS_KEY;
-    if (env?.USAJOBS_EMAIL) headers["User-Agent"] = env.USAJOBS_EMAIL;
-    const r = await fetchText(url.href, { headers }, budget);
-    diagnostics.push({ stage: "usajobs", query, ok: r.ok, status: r.status, milliseconds: r.milliseconds, bytes: r.bytes, error: r.ok ? null : r.error });
-    if (!r.ok) continue;
-    try {
-      const j = JSON.parse(r.text);
-      for (const x of j?.SearchResult?.SearchResultItems || []) {
-        const d = x.MatchedObjectDescriptor || {}, loc = d.PositionLocationDisplay || "";
-        const geo = geographicEvidence(loc, city, state), distance = estimateDistance(`${city}, ${state}`, loc);
-        if (geo.score < 45 || (distance != null && distance > radius)) continue;
-        const combined = `${d.PositionTitle || ""} ${d.OrganizationName || ""} ${d.UserArea?.Details?.JobSummary || ""} ${loc}`;
-        if (DANCE_RE.test(combined) || AMISH_RE.test(combined)) continue;
-        items.push({ id: key(d.PositionID || d.PositionTitle, d.PositionURI || url.href), title: d.PositionTitle || "USAJOBS opportunity", organization: d.OrganizationName || "", url: d.PositionURI || "https://www.usajobs.gov/", description: clean(d.UserArea?.Details?.JobSummary || "").slice(0, 1100), date: d.PublicationStartDate || "", closeDate: d.ApplicationCloseDate || "", location: loc, employmentType: d.PositionScheduleType?.[0]?.Name || "", source: "USAJOBS", score: relevanceScore(combined, interests) + geo.score, type: "job", discoveryQuality: "verified", locationScore: geo.score, distanceMiles: distance });
+
+  // USAJOBS uses broad regional anchors for discovery. Its Radius is deliberately not the acceptance rule:
+  // every result is validated against the user's home + requested radius using the Worker's own geography engine.
+  const usaAnchors = buildUSADiscoveryAnchors(city, state);
+  const usaQueries = buildUSAQueries(interests);
+  const seenUSA = new Set();
+  for (const anchor of usaAnchors) {
+    const anchorStats = { anchor, requests: 0, http200: 0, discovered: 0, accepted: 0, rejectedDistance: 0, rejectedUnknownDistance: 0, rejectedFilter: 0, duplicate: 0 };
+    for (const query of usaQueries) {
+      if (budget.used >= budget.limit) break;
+      usajobsQueries++;
+      anchorStats.requests++;
+      const url = new URL("https://data.usajobs.gov/api/search");
+      url.searchParams.set("Keyword", query);
+      url.searchParams.set("LocationName", `${anchor.city}, ${anchor.state}`);
+      // Search broadly. Actual distance acceptance happens below.
+      url.searchParams.set("Radius", "100");
+      url.searchParams.set("ResultsPerPage", "20");
+      if (partTime) url.searchParams.set("PositionScheduleTypeCode", "2");
+      const headers = {};
+      if (env?.USAJOBS_KEY) headers["Authorization-Key"] = env.USAJOBS_KEY;
+      if (env?.USAJOBS_EMAIL) headers["User-Agent"] = env.USAJOBS_EMAIL;
+      const r = await fetchText(url.href, { headers }, budget);
+      const statusDiag = { stage: "usajobs", anchor: anchor.label, city: anchor.city, state: anchor.state, query, ok: r.ok, status: r.status, milliseconds: r.milliseconds, bytes: r.bytes, error: r.ok ? null : r.error };
+      diagnostics.push(statusDiag);
+      if (!r.ok) continue;
+      anchorStats.http200++;
+      try {
+        const j = JSON.parse(r.text);
+        const results = j?.SearchResult?.SearchResultItems || [];
+        for (const x of results) {
+          const d = x.MatchedObjectDescriptor || {};
+          const loc = d.PositionLocationDisplay || "";
+          const id = String(d.PositionID || d.PositionURI || d.PositionTitle || "");
+          if (seenUSA.has(id)) { usajobsDuplicateCount++; anchorStats.duplicate++; continue; }
+          seenUSA.add(id);
+          usajobsDiscovered++;
+          anchorStats.discovered++;
+          const combined = `${d.PositionTitle || ""} ${d.OrganizationName || ""} ${d.UserArea?.Details?.JobSummary || ""} ${loc}`;
+          const geo = geographicEvidence(loc, city, state);
+          const distance = estimateDistance(`${city}, ${state}`, loc);
+          const filterReject = DANCE_RE.test(combined) || AMISH_RE.test(combined);
+          if (filterReject) {
+            usajobsExcludedByFilter++;
+            anchorStats.rejectedFilter++;
+            diagnostics.push({ stage: "usajobs-validation", anchor: anchor.label, query, positionId: d.PositionID || null, title: d.PositionTitle || "", location: loc, accepted: false, rejected: DANCE_RE.test(combined) ? "dance exclusion" : "Amish employer exclusion", geographicScore: geo.score, distanceMiles: distance });
+            continue;
+          }
+          if (distance != null && distance > radius) {
+            usajobsOutsideRadius++;
+            anchorStats.rejectedDistance++;
+            diagnostics.push({ stage: "usajobs-validation", anchor: anchor.label, query, positionId: d.PositionID || null, title: d.PositionTitle || "", location: loc, accepted: false, rejected: `outside requested radius (${distance} mi > ${radius} mi)`, geographicScore: geo.score, distanceMiles: distance });
+            continue;
+          }
+          if (distance == null) {
+            usajobsUnknownDistance++;
+            anchorStats.rejectedUnknownDistance++;
+            diagnostics.push({ stage: "usajobs-validation", anchor: anchor.label, query, positionId: d.PositionID || null, title: d.PositionTitle || "", location: loc, accepted: false, rejected: "unable to calculate distance from known city coordinates", geographicScore: geo.score, distanceMiles: null });
+            continue;
+          }
+          if (geo.score < 45) {
+            anchorStats.rejectedFilter++;
+            diagnostics.push({ stage: "usajobs-validation", anchor: anchor.label, query, positionId: d.PositionID || null, title: d.PositionTitle || "", location: loc, accepted: false, rejected: "insufficient geographic evidence", geographicScore: geo.score, distanceMiles: distance });
+            continue;
+          }
+          anchorStats.accepted++;
+          items.push({ id: key(d.PositionID || d.PositionTitle, d.PositionURI || url.href), title: d.PositionTitle || "USAJOBS opportunity", organization: d.OrganizationName || "", url: d.PositionURI || "https://www.usajobs.gov/", description: clean(d.UserArea?.Details?.JobSummary || "").slice(0, 1100), date: d.PublicationStartDate || "", closeDate: d.ApplicationCloseDate || "", location: loc, employmentType: d.PositionScheduleType?.[0]?.Name || "", source: "USAJOBS", score: relevanceScore(combined, interests) + geo.score, type: "job", discoveryQuality: "verified", locationScore: geo.score, distanceMiles: distance });
+        }
+      } catch (e) {
+        diagnostics.push({ stage: "usajobs-parse", anchor: anchor.label, query, ok: false, rejected: errorMessage(e) });
       }
-    } catch (e) { diagnostics.push({ stage: "usajobs-parse", query, ok: false, rejected: errorMessage(e) }); }
+    }
+    usajobsAnchorSummary.push(anchorStats);
   }
+
   for (const query of buildJobQueries(interests, city, state)) {
     if (budget.used >= budget.limit) break;
     const r = await searchWeb(query, env, budget);
@@ -598,10 +653,38 @@ async function discoverJobs(interests, city, state, radius, partTime, env) {
     }
   }
   const unique = dedupeBy(items, x => key(x.title, x.url)).slice(0, 100);
-  return { ok: true, version: VERSION, build: BUILD, city, state, radius, partTime, counts: { jobs: unique.length }, items: unique, jobs: unique, fetchBudget: budget, diagnostics };
+  return {
+    ok: true, version: VERSION, build: BUILD, city, state, radius, partTime,
+    counts: { jobs: unique.length }, items: unique, jobs: unique,
+    discovery: { usaJobs: { queries: usaQueries, anchors: usaAnchors.map(x => x.label), requests: usajobsQueries, discoveredBeforeFiltering: usajobsDiscovered, duplicates: usajobsDuplicateCount, rejectedOutsideRadius: usajobsOutsideRadius, rejectedUnknownDistance: usajobsUnknownDistance, rejectedByFilter: usajobsExcludedByFilter, survivedGeographicAndFilterValidation: items.filter(x => x.source === "USAJOBS").length, http200Responses: diagnostics.filter(x => x.stage === "usajobs" && x.status === 200).length, anchorSummary: usajobsAnchorSummary } },
+    fetchBudget: budget, diagnostics
+  };
+}
+function buildUSADiscoveryAnchors(city, state) {
+  if (!/^(OH|Ohio)$/i.test(state) || !/^(Mesopotamia|Warren)$/i.test(city)) return [{ label: `${city}, ${state}`, city, state }];
+  return [
+    { label: "Mesopotamia", city: "Mesopotamia", state: "OH" },
+    { label: "Warren", city: "Warren", state: "OH" },
+    { label: "Youngstown", city: "Youngstown", state: "OH" },
+    { label: "Ravenna", city: "Ravenna", state: "OH" },
+    { label: "Ashtabula", city: "Ashtabula", state: "OH" },
+    { label: "Akron", city: "Akron", state: "OH" },
+    { label: "Canton", city: "Canton", state: "OH" },
+    { label: "Cleveland", city: "Cleveland", state: "OH" }
+  ];
 }
 function buildJobQueries(interests, city, state) { const base = interestBase(interests).slice(0, 6), p = `"${city}" ${state}`; return [...new Set(base.map(x => `"${x}" ${p} (jobs OR careers OR employment OR hiring) -dance`))].slice(0, 6); }
-function buildUSAQueries(interests) { const src = interests.length ? interests : ["museum archaeology historic preservation", "welder fabrication woodworking", "bicycle mechanic", "parks recreation cultural resources"]; return [...new Set(src)].slice(0, 4); }
+function buildUSAQueries(interests) {
+  const broad = [
+    "maintenance facilities technician laborer mechanic equipment",
+    "trades fabrication welder woodworking technician",
+    "transportation warehouse material handling",
+    "parks recreation natural resources",
+    "cultural resources museum historic preservation archaeology"
+  ];
+  const interestQueries = interests.slice(0, 4).map(x => clean(x)).filter(Boolean);
+  return [...new Set([...broad, ...interestQueries])].slice(0, 8);
+}
 function parseNeoRlsJobs(html, baseUrl, interests, city, state, radius = 30, options = {}) {
   const base = new URL(baseUrl), jobs = [];
   for (const m of html.matchAll(/<h2[^>]*>([\s\S]*?)<\/h2>([\s\S]{0,12000}?)(?=<h2[^>]*>|$)/gi)) {
@@ -639,7 +722,7 @@ function parseNeoRlsJobs(html, baseUrl, interests, city, state, radius = 30, opt
 function parseJobs(html, baseUrl, interests, city, state, radius = 30, options = {}) {
   const base = new URL(baseUrl), text = clean(html), jobs = [], jsonld = [];
   const trusted = /neo-rls\.org/i.test(base.hostname) || /trusted job source/i.test(options.source || "");
-  for (const m of html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\\S]*?)<\/script>/gi)) { try { jsonld.push(...flattenJsonLd(JSON.parse(m[1].trim()))); } catch {} }
+  for (const m of html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) { try { jsonld.push(...flattenJsonLd(JSON.parse(m[1].trim()))); } catch {} }
   for (const x of jsonld) {
     const type = Array.isArray(x["@type"]) ? x["@type"].join(" ") : String(x["@type"] || "");
     if (!/JobPosting/i.test(type) || !x.title) continue;
@@ -668,7 +751,7 @@ function parseJobs(html, baseUrl, interests, city, state, radius = 30, options =
     if (DANCE_RE.test(combined) || AMISH_RE.test(combined)) continue;
     if (options.partTime && !/(part[- ]?time|\b\d{1,2}\s*(?:-|to)\s*\d{1,2}\s*hours?\b|20\s*hours?|32\s*hours?|hourly)/i.test(combined)) continue;
     const geo=geographicEvidence(combined,city,state), distance=estimateDistance(`${city}, ${state}`,combined), localByCity=!!cityKey(combined);
-    if ((geo.score<45 && !(trusted && localByCity)) || (distance!=null && distance>radius)) continue;
+    if ((geo.score<45 && !(trusted&&localByCity)) || (distance!=null && distance>radius)) continue;
     const date=findDate(combined), url=abs(m[1],base);
     jobs.push({id:key(title,url+"#"+date),title,organization:extractJobOrganization(combined),url,description:block.slice(0,1100),date,closeDate:findCloseDate(combined),location:extractJobLocation(combined,city,state),employmentType:/part[- ]?time/i.test(combined)?"Part-time":/full[- ]?time/i.test(combined)?"Full-time":"",source:options.source||"validated job block",score:relevanceScore(combined,interests)+geo.score,type:"job",discoveryQuality:"verified",locationScore:geo.score,distanceMiles:distance});
   }
