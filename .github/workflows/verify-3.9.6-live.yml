@@ -13,25 +13,15 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - name: Poll live Worker
+      - name: Verify live Worker
         run: |
           set -e
-          for i in 1 2 3 4 5 6; do
-            echo "Deployment check $i/6"
-            status=$(curl -fsSL --max-time 20 'https://opportunity-finder-v2.khc-comm.workers.dev/status' || true)
-            echo "$status"
-            if echo "$status" | grep -q '"version":"3.9.6"'; then
-              echo '3.9.6 is live.'
-              jobs=$(curl -fsSL --max-time 30 'https://opportunity-finder-v2.khc-comm.workers.dev/jobs?interests=museum%2Cartifact%20conservation%2Chistoric%20preservation%2Carchaeology%2Cbike%20mechanic%2Cwelding%2Cfabrication%2Cwoodworking%2Cartisan%2Ccrafts&home=Mesopotamia%2C%20Ohio&city=Mesopotamia&state=OH&radius=30&partTime=true')
-              echo "$jobs" | head -c 12000
-              echo
-              if echo "$jobs" | grep -q '"source": "NEO-RLS"' && ! echo "$jobs" | grep -q '"title": "JOBLine"'; then
-                echo 'Live NEO-RLS parser is returning real jobs and JOBLine garbage is absent.'
-                exit 0
-              fi
-              echo '3.9.6 is live, but the job payload is not yet showing the expected NEO-RLS results.'
-            fi
-            sleep 20
-          done
-          echo 'Live 3.9.6 deployment was not confirmed.'
-          exit 1
+          diag=$(curl -fsSL --max-time 20 'https://opportunity-finder-v2.khc-comm.workers.dev/test')
+          echo "$diag"
+          echo "$diag" | grep -q '"version":"3.9.6"'
+          jobs=$(curl -fsSL --max-time 45 'https://opportunity-finder-v2.khc-comm.workers.dev/jobs?interests=museum%2Cartifact%20conservation%2Chistoric%20preservation%2Carchaeology%2Cbike%20mechanic%2Cwelding%2Cfabrication%2Cwoodworking%2Cartisan%2Ccrafts&home=Mesopotamia%2C%20Ohio&city=Mesopotamia&state=OH&radius=30&partTime=true')
+          echo "$jobs" | head -c 12000
+          echo
+          echo "$jobs" | grep -q '"source":"NEO-RLS"\|"source": "NEO-RLS"'
+          ! echo "$jobs" | grep -q '"title":"JOBLine"\|"title": "JOBLine"'
+          echo 'Live 3.9.6 Worker and NEO-RLS parser verified.'
