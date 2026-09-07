@@ -1,6 +1,8 @@
 name: Patch local discovery
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - fix/local-discovery-noise
 permissions:
   contents: write
 jobs:
