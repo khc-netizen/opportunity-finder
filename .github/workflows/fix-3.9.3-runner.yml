@@ -1,0 +1,34 @@
+name: Fix 3.9.3 patch runner
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fix runner condition
+        shell: bash
+        run: |
+          if [ ! -f .github/patch-3.9.3.flag ]; then
+            echo "No 3.9.3 patch flag; nothing to do."
+            exit 0
+          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('.github/workflows/patch-3.9.3.yml')
+          s = p.read_text()
+          s = s.replace("    if: ${{ hashFiles('.github/patch-3.9.3.flag') != '' }}\n", "", 1)
+          p.write_text(s)
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/patch-3.9.3.yml
+          git diff --cached --quiet && exit 0
+          git commit -m "fix: allow 3.9.3 patch runner to execute"
+          git push
