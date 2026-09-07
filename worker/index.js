@@ -603,7 +603,7 @@ function parseJobs(html, baseUrl, interests, city, state, radius = 30, options =
 function looksLikeJobTitle(t) { return t.length >= 5 && t.length <= 180 && !/^(view job postings|job seekers|category|keyword|home|services|about)$/i.test(t) && !EVENT_RE.test(t); }
 function partTimeMatch(x) { return /part[- ]?time|20\s*hours?|32\s*hours?|hourly/i.test(`${x.employmentType || ""} ${x.description || ""}`); }
 function extractJobOrganization(t) { const m=t.match(/(?:at|for)\s+([A-Z][A-Za-z0-9&'’ .-]{2,100})(?:\s+(?:is|has|seeks|seeking|located|in)\b|$)/); return m ? clean(m[1]) : ""; }
-function extractJobLocation(t, city, state) { const m=t.match(new RegExp(`.{0,100}\\b${escapeRe(city)}\\b.{0,100}`, "i")); return clean(m ? m[0] : `${city}, ${state}`); }
+function extractJobLocation(t, city, state) { const m=t.match(new RegExp(`.{0,100}\b${escapeRe(city)}\b.{0,100}`, "i")); return clean(m ? m[0] : `${city}, ${state}`); }
 function findCloseDate(t) { const m=t.match(/(?:closes?|deadline|expires?|application close(?:s)?)[^\d]{0,30}(\b(?:20\d{2}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[/-]\d{1,2}[/-]20\d{2}|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:,\s*20\d{2})?))/i); return m ? m[1] : ""; }
 
 async function diagnostics(env, requestPath) {
