@@ -56,7 +56,7 @@ export default {
 };
 
 const VERSION = "3.9.6";
-const BUILD = "v3.9.6-neo-rls-geographic-validation-final2";
+const BUILD = "v3.9.6-usajobs-auth-header-fix";
 const SEARCH_LIMIT = 10;
 const PAGE_LIMIT = 72;
 
@@ -565,7 +565,7 @@ async function discoverJobs(interests, city, state, radius, partTime, env) {
     const url = new URL("https://data.usajobs.gov/api/search");
     url.searchParams.set("Keyword", query); url.searchParams.set("LocationName", `${city}, ${state}`); url.searchParams.set("Radius", String(radius)); url.searchParams.set("ResultsPerPage", "20");
     const headers = {};
-    if (env?.USAJOBS_KEY) headers.AuthorizationKey = env.USAJOBS_KEY;
+    if (env?.USAJOBS_KEY) headers["Authorization-Key"] = env.USAJOBS_KEY;
     if (env?.USAJOBS_EMAIL) headers["User-Agent"] = env.USAJOBS_EMAIL;
     const r = await fetchText(url.href, { headers }, budget);
     diagnostics.push({ stage: "usajobs", query, ok: r.ok, status: r.status, milliseconds: r.milliseconds, bytes: r.bytes, error: r.ok ? null : r.error });
