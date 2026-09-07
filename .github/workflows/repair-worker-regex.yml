@@ -1,0 +1,47 @@
+name: Repair worker regex escaping
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Repair and validate
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('worker/index.js')
+          s = p.read_text()
+          s = s.replace('application\\\\/ld\\\\+json', 'application\\/ld\\+json')
+          s = s.replace('<\\\\/script>', '<\\/script>')
+          s = s.replace('\\\\s', '\\s')
+          s = s.replace('\\\\b', '\\b')
+          s = s.replace('\\\\d', '\\d')
+          s = s.replace('\\\\1', '\\1')
+          s = s.replace('\\\\.', '\\.')
+          s = s.replace('\\\\+', '\\+')
+          s = s.replace('\\\\?', '\\?')
+          s = s.replace('\\\\/', '\\/')
+          p.write_text(s)
+          PY
+          node --check worker/index.js
+          node --input-type=module <<'NODE'
+          import { parseJobs } from './worker/index.js';
+          const html = '<html><body><h2>Delivery Driver (Part Time) - Warren-Trumbull County Public Library</h2><div>This part-time position is in Warren, Ohio. Apply now.</div><h2>Building Maintenance Worker (Part Time) - Warren-Trumbull County Public Library</h2><div>Part-time position in Warren, OH.</div></body></html>';
+          const jobs = parseJobs(html, 'https://www.neo-rls.org/view_job_postings.php', ['library'], 'Mesopotamia', 'OH', 30, {source:'NEO-RLS', partTime:true});
+          if (jobs.length < 2) throw new Error('job parser validation failed');
+          console.log('worker regex repair validation passed', jobs.length);
+          NODE
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add worker/index.js
+          git diff --cached --quiet && exit 0
+          git commit -m "fix: repair worker parser regex escaping"
+          git push
