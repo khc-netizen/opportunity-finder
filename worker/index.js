@@ -56,7 +56,7 @@ export default {
 };
 
 const VERSION = "3.9.6";
-const BUILD = "v3.9.6-usajobs-auth-header-fix";
+const BUILD = "v3.9.7-usajobs-local-parttime";
 const SEARCH_LIMIT = 10;
 const PAGE_LIMIT = 72;
 
@@ -563,7 +563,7 @@ async function discoverJobs(interests, city, state, radius, partTime, env) {
   for (const query of buildUSAQueries(interests)) {
     if (budget.used >= budget.limit) break;
     const url = new URL("https://data.usajobs.gov/api/search");
-    url.searchParams.set("Keyword", query); url.searchParams.set("LocationName", `${city}, ${state}`); url.searchParams.set("Radius", String(radius)); url.searchParams.set("ResultsPerPage", "20");
+    url.searchParams.set("Keyword", query); const usaLocation = /^(Mesopotamia)$/i.test(city) && /^(OH|Ohio)$/i.test(state) ? "Mesopotamia, Ohio;Warren, Ohio" : `${city}, ${state}`; url.searchParams.set("LocationName", usaLocation); url.searchParams.set("Radius", String(radius)); url.searchParams.set("ResultsPerPage", "20"); if (partTime) url.searchParams.set("PositionScheduleTypeCode", "2");
     const headers = {};
     if (env?.USAJOBS_KEY) headers["Authorization-Key"] = env.USAJOBS_KEY;
     if (env?.USAJOBS_EMAIL) headers["User-Agent"] = env.USAJOBS_EMAIL;
