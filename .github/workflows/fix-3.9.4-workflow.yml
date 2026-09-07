@@ -17,23 +17,27 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-      - name: Patch NEO-RLS acceptance rule
+      - name: Patch NEO-RLS parser only
         run: |
           python3 - <<'PY'
           from pathlib import Path
           p = Path('worker/index.js')
           s = p.read_text()
+          start = s.index('function parseNeoRlsJobs(')
+          end = s.index('function parseJobs(', start)
+          section = s[start:end]
           old = 'if (geo.score < 45 || (distance != null && distance > radius)) continue;'
           new = 'if ((geo.score < 45 && distance == null) || (distance != null && distance > radius)) continue;'
-          if old not in s:
-              raise SystemExit('Expected NEO-RLS geographic acceptance rule was not found')
-          s = s.replace(old, new, 1)
+          if old not in section:
+              raise SystemExit('NEO-RLS geographic rule not found inside parseNeoRlsJobs')
+          section = section.replace(old, new, 1)
+          s = s[:start] + section + s[end:]
           s = s.replace('const VERSION = "3.9.5";', 'const VERSION = "3.9.6";', 1)
           s = s.replace('const BUILD = "v3.9.5-source-specific-job-event-repair";', 'const BUILD = "v3.9.6-neo-rls-geographic-acceptance";', 1)
           p.write_text(s)
           PY
           node --check worker/index.js
-      - name: Test against live NEO-RLS
+      - name: Test actual NEO-RLS page
         run: |
           node --input-type=module <<'JS'
           import { parseNeoRlsJobs } from './worker/index.js';
@@ -46,7 +50,7 @@ jobs:
           if (!jobs.some(j => /Warren/i.test(j.title + ' ' + j.location))) throw new Error('Expected a Warren listing');
           if (!jobs.some(j => /Garrettsville/i.test(j.title + ' ' + j.location))) throw new Error('Expected a Garrettsville listing');
           JS
-      - name: Commit validated repair
+      - name: Commit validated 3.9.6 worker
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
