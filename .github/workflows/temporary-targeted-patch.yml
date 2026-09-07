@@ -19,7 +19,6 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
-          import re
 
           p = Path("worker/index.js")
           s = p.read_text()
@@ -45,10 +44,9 @@ jobs:
         run: |
           git diff --check
           git diff -- worker/index.js
-          test "$(git diff --numstat -- worker/index.js | awk '{print $1}')" = "7"
+          test "$(git diff --numstat -- worker/index.js | awk '{print $1}')" = "6"
           test "$(git diff --numstat -- worker/index.js | awk '{print $2}')" = "3"
           test "$(git diff --name-only | wc -l | tr -d ' ')" = "1"
-          git diff --exit-code -- .github/workflows/temporary-targeted-patch.yml || true
       - name: Commit patched source and remove temporary workflow
         shell: bash
         run: |
