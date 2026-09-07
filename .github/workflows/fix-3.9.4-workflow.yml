@@ -17,81 +17,22 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-      - name: Replace NEO-RLS parser
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('worker/index.js')
-          s = p.read_text()
-          start = s.index('function parseNeoRlsJobs(')
-          end = s.index('function parseJobs(', start)
-          fn = r'''function parseNeoRlsJobs(html, baseUrl, interests, city, state, radius = 30, options = {}) {
-            const base = new URL(baseUrl), jobs = [];
-            const partTimeRe = /part[- ]?time|\b\d{1,2}\s*(?:-|to)\s*\d{1,2}\s*hours?\b|\b(?:12|15|16|18|20|24|25|30|32)\s*hours?\b|hourly/i;
-            for (const m of html.matchAll(/<h2[^>]*>([\s\S]*?)<\/h2>([\s\S]{0,12000}?)(?=<h2[^>]*>|$)/gi)) {
-              const title = clean(m[1]);
-              const block = clean(m[2]);
-              if (!title || !block || title.length < 5 || title.length > 180) continue;
-              if (/^(?:view job postings|job seekers|category|keyword|home|jobline|job postings)$/i.test(title)) continue;
-              const combined = `${title} ${block}`;
-              if (DANCE_RE.test(combined) || AMISH_RE.test(combined)) continue;
-              if (options.partTime && !partTimeRe.test(combined)) continue;
-              const placeKey = cityKey(combined);
-              const distance = estimateDistance(`${city}, ${state}`, combined);
-              const geo = geographicEvidence(combined, city, state);
-              if (distance != null) {
-                if (distance > radius) continue;
-              } else if (geo.score < 45) {
-                continue;
-              }
-              const link = (m[2].match(/<a[^>]+href=["']([^"']+)["'][^>]*>\s*Read More/i) || [])[1];
-              const url = abs(link || base.href, base);
-              const location = placeKey ? `${placeKey.split(',')[0]}, OH` : extractJobLocation(combined, city, state);
-              jobs.push({
-                id: key(title, url),
-                title,
-                organization: extractJobOrganization(combined),
-                url,
-                description: block.slice(0, 1100),
-                date: findDate(combined),
-                closeDate: findCloseDate(combined),
-                location,
-                employmentType: /part[- ]?time/i.test(combined) ? "Part-time" : /full[- ]?time/i.test(combined) ? "Full-time" : "",
-                source: "NEO-RLS",
-                score: relevanceScore(combined, interests) + Math.max(geo.score, placeKey ? 50 : 0),
-                type: "job",
-                discoveryQuality: "verified",
-                locationScore: Math.max(geo.score, placeKey ? 50 : 0),
-                distanceMiles: distance
-              });
-            }
-            return dedupeBy(jobs, x => key(x.title, x.url));
-          }
-          '''
-          s = s[:start] + fn + s[end:]
-          s = s.replace('const VERSION = "3.9.5";', 'const VERSION = "3.9.6";', 1)
-          s = s.replace('const BUILD = "v3.9.5-source-specific-job-event-repair";', 'const BUILD = "v3.9.6-neo-rls-source-parser";', 1)
-          p.write_text(s)
-          PY
-          node --check worker/index.js
-      - name: Test actual NEO-RLS listings
+      - name: Diagnose source parser filters
         run: |
           node --input-type=module <<'JS'
-          import { parseNeoRlsJobs } from './worker/index.js';
+          import { parseNeoRlsJobs, estimateDistance, geographicEvidence } from './worker/index.js';
           const r = await fetch('https://www.neo-rls.org/view_job_postings.php');
           const html = await r.text();
-          const jobs = parseNeoRlsJobs(html, 'https://www.neo-rls.org/view_job_postings.php', ['museum','artifact conservation','historic preservation','archaeology','bike mechanic','welding','fabrication','woodworking','artisan','crafts'], 'Mesopotamia', 'OH', 30, {source:'NEO-RLS',partTime:true});
-          console.log('NEO-RLS HTTP', r.status, 'bytes', html.length, 'parsed jobs', jobs.length);
-          for (const j of jobs) console.log(j.title, '|', j.location, '|', j.distanceMiles, 'mi');
-          if (jobs.length < 4) throw new Error('Expected at least 4 local part-time NEO-RLS jobs');
-          if (!jobs.some(j => /Warren/i.test(j.title + ' ' + j.location))) throw new Error('Expected a Warren listing');
-          if (!jobs.some(j => /Garrettsville/i.test(j.title + ' ' + j.location))) throw new Error('Expected a Garrettsville listing');
-          if (jobs.some(j => /Hudson|Barberton|Streetsboro/i.test(j.title + ' ' + j.location))) throw new Error('Out-of-radius job incorrectly accepted');
+          const ms = [...html.matchAll(/<h2[^>]*>([\s\S]*?)<\/h2>([\s\S]{0,12000}?)(?=<h2[^>]*>|$)/gi)];
+          console.log('H2', ms.length);
+          for (const m of ms.slice(0,16)) {
+            const title = m[1].replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
+            const block = m[2].replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
+            const combined = title + ' ' + block;
+            console.log(JSON.stringify({title,partTime:/part[- ]?time|\b\d{1,2}\s*(?:-|to)\s*\d{1,2}\s*hours?\b|\b(?:12|15|16|18|20|24|25|30|32)\s*hours?\b|hourly/i.test(combined),distance:estimateDistance('Mesopotamia, OH',combined),geo:geographicEvidence(combined,'Mesopotamia','OH').score}));
+          }
+          console.log('PARSER partTime=true', parseNeoRlsJobs(html,'https://www.neo-rls.org/view_job_postings.php',[], 'Mesopotamia','OH',30,{source:'NEO-RLS',partTime:true}).length);
+          console.log('PARSER partTime=false', parseNeoRlsJobs(html,'https://www.neo-rls.org/view_job_postings.php',[], 'Mesopotamia','OH',30,{source:'NEO-RLS',partTime:false}).length);
           JS
-      - name: Commit validated 3.9.6 worker
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add worker/index.js
-          git commit -m "Phase 3.9.6 source-specific NEO-RLS parser" || exit 0
-          git push origin main
+      - name: Validate syntax
+        run: node --check worker/index.js
