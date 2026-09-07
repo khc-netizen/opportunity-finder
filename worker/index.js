@@ -22,8 +22,9 @@ export default {
 
       const p = Object.fromEntries(url.searchParams.entries());
       const interests = splitParam(p.interests);
-      const city = p.city || "Mesopotamia";
-      const state = p.state || "OH";
+      const home = parseHomeLocation(p.home || "");
+      const city = p.city || home.city || "Mesopotamia";
+      const state = p.state || home.state || "OH";
       const radius = clamp(Number(p.radius || 30), 1, 100);
 
       if (url.pathname === "/discover") {
@@ -31,7 +32,11 @@ export default {
       }
       if (url.pathname === "/groups") {
         const r = await discover(interests, city, state, radius, env);
-        return json({ ...r, events: undefined, jobs: undefined }, cors);
+        return json({ ...r, items: r.groups || [], events: undefined, jobs: undefined }, cors);
+      }
+      if (url.pathname === "/events") {
+        const r = await discover(interests, city, state, radius, env);
+        return json({ ...r, items: r.events || [], groups: undefined, jobs: undefined, uniqueCount: (r.events || []).length }, cors);
       }
       if (url.pathname === "/jobs") {
         const partTime = p.partTime !== "false";
@@ -54,6 +59,16 @@ const VERSION = "3.9.0";
 const BUILD = "v3.9.0-clean-local-validation";
 const SEARCH_LIMIT = 10;
 const PAGE_LIMIT = 72;
+
+// Verified regional organizations/venues used as discovery anchors. These are organization seeds,
+// not hard-coded event records; their live pages are fetched and validated before appearing.
+const BUILTIN_DISCOVERY_SEEDS = [
+  "https://www.trumbullbeekeepers.org/",
+  "https://www.wraba.com/",
+  "https://centuryvillagemuseum.org/",
+  "https://www.trumbullcountyhistory.com/",
+  "https://sites.google.com/trumbullcountyhistory.org/trumbull-history-hub/home/mesopotamia"
+];
 const DANCE_RE = /\bdance\b|dancing|ballroom|ballet|tap dance|jazz dance|dance studio|dance academy/i;
 const JUNK_HOST_RE = /(?:facebook|instagram|linkedin|youtube|tiktok|pinterest|x\.com|twitter|wikipedia|yelp|tripadvisor)\./i;
 const ARTICLE_RE = /\b(?:news|newspaper|journalism|press release|obituary|podcast|radio|weather|scoreboard|politics|election|recipe|restaurant review|blog post)\b/i;
@@ -61,8 +76,16 @@ const CAREER_RE = /(?:career|careers|jobs|employment|work with us|join our team|
 const ORG_RE = /(?:association|society|club|guild|chapter|council|league|organization|organisation|foundation|historical society|heritage|museum|library|conservancy|preservation|collective|fellowship|alliance|coalition|volunteer group|chapter)/i;
 const VENUE_RE = /(?:museum|library|historic site|historical site|heritage center|heritage centre|park|nature center|nature centre|arboretum|botanical garden|fairgrounds|community center|community centre|cultural center|cultural centre|observatory|visitor center|visitor centre|hall|farm|homestead|mill|theater|theatre)/i;
 const EVENT_RE = /(?:event|calendar|meeting|workshop|program|programme|exhibit|exhibition|festival|fair|lecture|tour|open house|class|demo|demonstration|registration|tickets|admission|rsvp)/i;
-const LOCAL_REGION_RE = /\b(?:ohio|oh|trumbull|warren|mesopotamia|northeast ohio|geauga|portage|ashtabula|mahoning|columbiana|summit|lake|cuyahoga|pennsylvania|pa)\b/i;
+const LOCAL_REGION_RE = /\b(?:ohio|trumbull|warren|northeast ohio|geauga|portage|ashtabula|mahoning|columbiana|summit|lake|cuyahoga)\b/i;
 
+function parseHomeLocation(value) {
+  const raw = clean(value);
+  if (!raw) return { city: "", state: "" };
+  const parts = raw.split(",").map(x => x.trim()).filter(Boolean);
+  const city = parts[0] || "";
+  const state = parts[1] ? (parts[1].match(/\b(?:OH|Ohio)\b/i)?.[0] || parts[1]) : "";
+  return { city, state };
+}
 function splitParam(s) { return String(s || "").split(",").map(x => x.trim()).filter(Boolean); }
 function errorMessage(e) { return e instanceof Error ? (e.message || String(e)) : typeof e === "string" ? e : (() => { try { return JSON.stringify(e); } catch { return String(e); } })(); }
 function json(data, cors, status = 200) { return new Response(JSON.stringify(data, null, 2), { status, headers: { "Content-Type": "application/json; charset=utf-8", ...cors } }); }
@@ -143,7 +166,7 @@ function buildOrgQueries(interests, city, state) {
   const places = targetPlaces(city, state), cats = interestBase(interests), qs = [];
   for (let i = 0; i < Math.min(10, cats.length); i++) {
     const p = places[i % places.length];
-    qs.push(`"${cats[i]}" ${p} (association OR society OR club OR guild OR chapter OR organization) -dance`);
+    qs.push(`"${cats[i]}" ${p} Ohio (association OR society OR club OR guild OR chapter OR organization) -dance`);
     if (i < 5) qs.push(`${p} ("historical society" OR museum OR "nature center" OR beekeepers OR blacksmith OR reenactment OR "craft guild") -dance`);
   }
   return [...new Set(qs)].slice(0, SEARCH_LIMIT);
@@ -178,7 +201,7 @@ async function discover(interests, city, state, radius, env) {
   }
 
   // Optional trusted seeds can be used to improve recall for obscure local groups.
-  for (const u of [...listEnv(env, "GROUP_SEEDS"), ...listEnv(env, "DISCOVERY_SEEDS")]) if (acceptDiscoveryUrl(u, state)) orgCandidates.push({ url: u, query: "configured seed" });
+  for (const u of [...BUILTIN_DISCOVERY_SEEDS, ...listEnv(env, "GROUP_SEEDS"), ...listEnv(env, "DISCOVERY_SEEDS")]) if (acceptDiscoveryUrl(u, state)) orgCandidates.push({ url: u, query: "trusted discovery seed" });
 
   const uniqueOrgUrls = dedupeCandidateUrls(orgCandidates).slice(0, 14);
   const organizations = [];
@@ -186,7 +209,7 @@ async function discover(interests, city, state, radius, env) {
     const r = await fetchText(c.url, {}, budget);
     const d = { stage: "organization-validation", url: c.url, query: c.query, ok: r.ok, status: r.status, milliseconds: r.milliseconds, bytes: r.bytes, accepted: 0, rejected: null, evidence: [] };
     if (!r.ok) { d.rejected = r.error || `HTTP ${r.status}`; diagnostics.push(d); continue; }
-    const page = parseOrganizationPage(r.text, c.url, interests, city, state);
+    const page = parseOrganizationPage(r.text, c.url, interests, city, state, false, radius);
     d.evidence = page.evidence; d.accepted = page.organizations.length; d.rejected = page.organizations.length ? null : page.rejectReason;
     diagnostics.push(d); organizations.push(...page.organizations);
   }
@@ -204,7 +227,7 @@ async function discover(interests, city, state, radius, env) {
     const r = await fetchText(c.url, {}, budget);
     const d = { stage: "venue-validation", url: c.url, query: c.query, ok: r.ok, status: r.status, accepted: 0, rejected: null };
     if (!r.ok) { d.rejected = r.error || `HTTP ${r.status}`; diagnostics.push(d); continue; }
-    const page = parseOrganizationPage(r.text, c.url, interests, city, state, true);
+    const page = parseOrganizationPage(r.text, c.url, interests, city, state, true, radius);
     d.accepted = page.organizations.length; d.rejected = page.organizations.length ? null : page.rejectReason; diagnostics.push(d); venues.push(...page.organizations);
   }
 
@@ -221,7 +244,7 @@ async function discover(interests, city, state, radius, env) {
         const pr = await fetchText(u, {}, budget);
         const d = { stage: "event-validation", organization: org.name, url: u, ok: pr.ok, status: pr.status, accepted: 0, rejected: null };
         if (!pr.ok) { d.rejected = pr.error || `HTTP ${pr.status}`; diagnostics.push(d); continue; }
-        const found = parseEvents(pr.text, u, interests, city, state, org);
+        const found = parseEvents(pr.text, u, interests, city, state, org, radius);
         d.accepted = found.events.length; d.rejected = found.events.length ? null : found.rejectReason; diagnostics.push(d); events.push(...found.events);
       }
     }
@@ -262,14 +285,14 @@ function isObviousOutOfState(u, state) {
   if (!/^(OH|Ohio)$/i.test(state)) return false;
   const t = norm(u);
   const outside = /\b(?:new jersey|new york|pennsylvania|michigan|indiana|kentucky|west virginia)\b/.test(t);
-  const ohio = /\b(?:ohio|trumbull|warren|northeast ohio|geauga|portage|ashtabula|mahoning|columbiana|summit|lake|cuyahoga)\b/.test(t);
+  const ohio = /\b(?:ohio|oh|trumbull|warren|northeast ohio|geauga|portage|ashtabula|mahoning|columbiana|summit|lake|cuyahoga)\b/.test(t);
   return outside && !ohio;
 }
 function dedupeCandidateUrls(arr) { const m = new Map(); for (const x of arr) if (!m.has(urlKey(x.url))) m.set(urlKey(x.url), x); return [...m.values()]; }
 function dedupeOrganizations(arr) { return dedupeBy(arr, x => key(x.name, x.url)).sort((a, b) => (b.confidence - a.confidence) || (b.score - a.score)); }
 function dedupeBy(arr, fn) { const m = new Map(); for (const x of arr) { const k = fn(x); if (!k || m.has(k)) continue; m.set(k, x); } return [...m.values()]; }
 
-function parseOrganizationPage(html, baseUrl, interests, city, state, venueMode = false) {
+function parseOrganizationPage(html, baseUrl, interests, city, state, venueMode = false, radius = 75) {
   const base = new URL(baseUrl), text = clean(html), title = clean((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || ""), desc = clean((html.match(/<meta[^>]+(?:name|property)=["'](?:description|og:description)["'][^>]+content=["']([^"']*)/i) || [])[1] || "");
   const evidence = [];
   if (ORG_RE.test(`${title} ${desc} ${text.slice(0, 8000)}`)) evidence.push("organization-language");
@@ -288,6 +311,8 @@ function parseOrganizationPage(html, baseUrl, interests, city, state, venueMode 
   const combined = `${title} ${desc} ${structuredText} ${text.slice(0, 12000)}`;
   const orgEvidence = ORG_RE.test(combined), venueEvidence = VENUE_RE.test(combined);
   const localEvidence = geographicEvidence(combined, city, state);
+  const distance = estimateDistance(`${city}, ${state}`, `${structuredText} ${text.slice(0, 12000)}`);
+  if (distance != null && distance > radius) return { organizations: [], evidence, rejectReason: `outside requested radius (${distance} mi)` };
   if (hardOutOfArea(combined, city, state) && !new RegExp(`\\b${escapeRe(city)}\\b`, "i").test(combined)) return { organizations: [], evidence, rejectReason: "page contains a contradictory out-of-area location" };
   if ((!orgEvidence && !venueEvidence) || localEvidence.score < 45) {
     return { organizations: [], evidence, rejectReason: !orgEvidence && !venueEvidence ? "insufficient organization/venue evidence" : "insufficient geographic evidence" };
@@ -298,7 +323,7 @@ function parseOrganizationPage(html, baseUrl, interests, city, state, venueMode 
   return { organizations: [{
     id: key(name, base.href), name, url: base.href, description: desc.slice(0, 900),
     type: classifyOrg(`${name} ${desc}`), confidence: Math.min(100, 55 + (orgEvidence ? 18 : 10) + (venueEvidence ? 12 : 0) + localEvidence.score / 4 + Math.min(score, 15)),
-    score: score + localEvidence.score, location: structuredLocations[0] || extractLocation(text, city, state), source: "validated public page", discoveryQuality: "verified", locationScore: localEvidence.score
+    score: score + localEvidence.score, location: extractLocation(text, city, state), source: "validated public page", discoveryQuality: "verified", locationScore: localEvidence.score
   }], evidence, rejectReason: null };
 }
 function extractOrganizationStructuredData(html) {
@@ -316,7 +341,7 @@ function extractOrganizationStructuredData(html) {
 function hardOutOfArea(text, city, state) {
   if (!/^(OH|Ohio)$/i.test(state)) return false;
   const t = norm(text);
-  const hasOhio = /\bohio\b/.test(t) || /\boh\b/.test(t);
+  const hasOhio = /\b(?:ohio|oh|trumbull|warren|northeast ohio|geauga|portage|ashtabula|mahoning|columbiana|summit|lake|cuyahoga)\b/.test(t);
   const hasOutside = /\b(?:new jersey|new york|pennsylvania|michigan|indiana|kentucky|west virginia)\b/.test(t);
   return hasOutside && !hasOhio;
 }
@@ -341,19 +366,62 @@ function classifyOrg(t) {
   if (/guild|craft|artisan|maker/.test(x)) return "traditional crafts";
   return "community organization";
 }
+const CITY_COORDS = {
+  "Mesopotamia, OH":[41.464,-80.975], "Warren, OH":[41.237,-80.818],
+  "Cortland, OH":[41.330,-80.726], "Niles, OH":[41.182,-80.765],
+  "Newton Falls, OH":[41.189,-80.978], "Farmington, OH":[41.341,-81.051],
+  "North Bloomfield, OH":[41.464,-80.982], "West Farmington, OH":[41.341,-81.051],
+  "Middlefield, OH":[41.462,-81.074], "Youngstown, OH":[41.099,-80.649],
+  "Ravenna, OH":[41.157,-81.242], "Akron, OH":[41.081,-81.519],
+  "Cleveland, OH":[41.499,-81.694], "Chardon, OH":[41.581,-81.208],
+  "Burton, OH":[41.471,-81.145], "Kent, OH":[41.153,-81.357],
+  "Mentor, OH":[41.666,-81.339], "Columbus, OH":[39.961,-82.999], "Garrettsville, OH":[41.284,-81.097],
+  "Hiram, OH":[41.313,-81.144], "Painesville, OH":[41.724,-81.245],
+  "Ashtabula, OH":[41.865,-80.789], "Geneva, OH":[41.805,-80.948],
+  "Jefferson, OH":[41.738,-80.769], "Lisbon, OH":[40.772,-80.768],
+  "Canton, OH":[40.798,-81.378], "Alliance, OH":[40.915,-81.106],
+  "Medina, OH":[41.138,-81.863], "Wooster, OH":[40.798,-81.938],
+  "Hudson, OH":[41.240,-81.440], "Aurora, OH":[41.317,-81.345],
+  "Twinsburg, OH":[41.313,-81.440], "Stow, OH":[41.159,-81.440],
+  "Brimfield, OH":[41.100,-81.347], "Freedom Township, OH":[41.133,-81.252],
+  "Canfield, OH":[41.025,-80.760], "Strongsville, OH":[41.313,-81.835],
+  "Brunswick, OH":[41.238,-81.841], "Eastlake, OH":[41.653,-81.450],
+  "Willoughby, OH":[41.639,-81.406], "Beachwood, OH":[41.464,-81.508],
+  "Solon, OH":[41.389,-81.441], "Bay Village, OH":[41.484,-81.922],
+  "Lakewood, OH":[41.482,-81.798], "Parma, OH":[41.405,-81.722]
+};
+function cityKey(text) {
+  const t = norm(text);
+  for (const k of Object.keys(CITY_COORDS).sort((a,b) => b.length - a.length)) {
+    if (new RegExp(`\\b${escapeRe(k.split(",")[0])}\\b`, "i").test(t)) return k;
+  }
+  return null;
+}
+function estimateDistance(home, placeText) {
+  const homeKey = cityKey(home) || "Mesopotamia, OH";
+  const placeKey = cityKey(placeText);
+  if (!placeKey) return null;
+  const a = CITY_COORDS[homeKey], b = CITY_COORDS[placeKey];
+  if (!a || !b) return null;
+  const rad = Math.PI / 180, lat1 = a[0] * rad, lat2 = b[0] * rad;
+  const dlat = (b[0] - a[0]) * rad, dlon = (b[1] - a[1]) * rad;
+  const h = Math.sin(dlat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dlon/2)**2;
+  return Math.round(3958.8 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1-h)));
+}
 function geographicEvidence(text, city, state) {
   const t = norm(text);
   if (/^(OH|Ohio)$/i.test(state)) {
     const hasOhio = /\bohio\b/.test(t);
     const hasOhioAbbr = /\boh\b/.test(t);
+    const hasState = hasOhio || hasOhioAbbr;
     const hasCity = city ? new RegExp(`\\b${escapeRe(norm(city))}\\b`, "i").test(t) : false;
     const hasCountyOrRegion = /\b(?:trumbull county|trumbull|warren|northeast ohio|geauga county|geauga|portage county|portage|ashtabula county|ashtabula|mahoning county|mahoning|columbiana county|columbiana|summit county|summit|lake county|lake|cuyahoga county|cuyahoga)\b/.test(t);
     let score = 0;
-    // City name alone is deliberately NOT local evidence because Mesopotamia is also an ancient region.
-    if (hasOhio || hasOhioAbbr) score += 45;
-    if (hasCity && (hasOhio || hasOhioAbbr)) score += 35;
-    if (hasCountyOrRegion && (hasOhio || hasOhioAbbr)) score += 20;
-    return { score: Math.min(100, score), hasOhio, hasOhioAbbr, hasCity, hasCountyOrRegion };
+    // The city name alone is deliberately NOT local evidence because "Mesopotamia" is also an ancient region.
+    if (hasState) score += 45;
+    if (hasCity && hasState) score += 35;
+    if (hasCountyOrRegion && hasState) score += 20;
+    return { score: Math.min(100, score), hasOhio, hasOhioAbbr, hasState, hasCity, hasCountyOrRegion };
   }
   const wantedState = norm(state);
   const hasState = wantedState && new RegExp(`\\b${escapeRe(wantedState)}\\b`, "i").test(t);
@@ -366,7 +434,7 @@ function extractLocation(text, city, state) {
 }
 function escapeRe(s) { return String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
 
-function parseEvents(html, baseUrl, interests, city, state, org) {
+function parseEvents(html, baseUrl, interests, city, state, org, radius = 75) {
   const base = new URL(baseUrl), events = [], text = clean(html), evidence = [];
   const jsonld = [];
   for (const m of html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
@@ -378,8 +446,9 @@ function parseEvents(html, baseUrl, interests, city, state, org) {
     const location = formatLocation(x.location), combined = `${x.name} ${x.description || ""} ${location} ${typeof x.organizer === "object" ? x.organizer?.name || "" : x.organizer || ""}`;
     if (DANCE_RE.test(combined)) continue;
     const geo = geographicEvidence(combined + " " + text.slice(0, 8000), city, state);
-    if (geo.score < 45) continue;
-    events.push({ id: key(x.name, x.url || base.href), title: clean(x.name), description: clean(x.description || "").slice(0, 1000), url: abs(x.url || base.href, base), date: x.startDate, endDate: x.endDate || "", location, organizer: clean(typeof x.organizer === "object" ? x.organizer?.name || org.name : x.organizer || org.name), source: "JSON-LD Event", score: relevanceScore(combined, interests) + geo.score, type: "event", discoveryQuality: "verified", locationScore: geo.score, host: org.name });
+    const distance = estimateDistance(`${city}, ${state}`, location);
+    if (geo.score < 45 || (distance != null && distance > radius)) continue;
+    events.push({ id: key(x.name, x.url || base.href), title: clean(x.name), description: clean(x.description || "").slice(0, 1000), url: abs(x.url || base.href, base), date: x.startDate, endDate: x.endDate || "", location, organizer: clean(typeof x.organizer === "object" ? x.organizer?.name || org.name : x.organizer || org.name), source: "JSON-LD Event", score: relevanceScore(combined, interests) + geo.score, type: "event", discoveryQuality: "verified", locationScore: geo.score, distanceMiles: distance, distance, org: org.name, host: org.name });
   }
   if (events.length) evidence.push("JSON-LD Event");
 
@@ -389,17 +458,25 @@ function parseEvents(html, baseUrl, interests, city, state, org) {
     const date = findDate(block);
     if (!date || !EVENT_RE.test(block) || DANCE_RE.test(block) || ARTICLE_RE.test(block.slice(0, 500))) continue;
     const geo = geographicEvidence(block + " " + text.slice(0, 5000), city, state);
-    if (geo.score < 45) continue;
+    const location = extractLocation(block, city, state);
+    const distance = estimateDistance(`${city}, ${state}`, location);
+    if (geo.score < 45 || (distance != null && distance > radius)) continue;
     const h = clean((m[1].match(/<h[1-4][^>]*>([\s\S]*?)<\/h[1-4]>/i) || [])[1] || block.slice(0, 160));
     if (h.length < 4) continue;
-    events.push({ id: key(h, base.href + "#" + date), title: h, description: block.slice(0, 1000), url: base.href, date, endDate: "", location: extractLocation(block, city, state), organizer: org.name, source: "validated event block", score: relevanceScore(block, interests) + geo.score, type: "event", discoveryQuality: "verified", locationScore: geo.score, host: org.name });
+    events.push({ id: key(h, base.href + "#" + date), title: h, description: block.slice(0, 1000), url: base.href, date, endDate: "", location, organizer: org.name, source: "validated event block", score: relevanceScore(block, interests) + geo.score, type: "event", discoveryQuality: "verified", locationScore: geo.score, distanceMiles: distance, distance, org: org.name, host: org.name });
   }
   if (events.length && !evidence.includes("HTML event block")) evidence.push("HTML event block");
   if (!events.length) return { events: [], evidence, rejectReason: !EVENT_RE.test(text) ? "no event-specific evidence" : "no validated local event" };
   return { events: dedupeBy(events, x => key(x.title, x.url + x.date)), evidence, rejectReason: null };
 }
 function flattenJsonLd(x) { if (Array.isArray(x)) return x.flatMap(flattenJsonLd); if (x && typeof x === "object") return [x, ...(Array.isArray(x["@graph"]) ? x["@graph"].flatMap(flattenJsonLd) : [])]; return []; }
-function formatLocation(x) { if (!x) return ""; if (typeof x === "string") return clean(x); if (Array.isArray(x)) return x.map(formatLocation).filter(Boolean).join("; "); if (x.address) return [x.name, formatLocation(x.address)].filter(Boolean).join(", "); return [x.name, x.streetAddress, x.addressLocality, x.addressRegion, x.postalCode].filter(Boolean).map(clean).join(", "); }
+function formatLocation(x) {
+  if (!x) return "";
+  if (typeof x === "string") return clean(x);
+  if (Array.isArray(x)) return x.map(formatLocation).filter(Boolean).join("; ");
+  if (x.address) return [x.name, formatLocation(x.address)].filter(Boolean).join(", ");
+  return [x.name, x.streetAddress, x.addressLocality, x.addressRegion, x.postalCode].filter(Boolean).map(clean).join(", ");
+}
 function findDate(t) { const m = String(t).match(/\b(?:20\d{2}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[/-]\d{1,2}[/-]20\d{2}|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:,\s*20\d{2})?)\b/i); return m ? m[0] : ""; }
 function relevanceScore(text, interests) { const t = norm(text); let s = 0; for (const i of interests) { const q = norm(i); if (!q) continue; if (t.includes(q)) s += 10; for (const w of q.split(" ").filter(x => x.length > 3)) if (t.includes(w)) s += 2; } return s; }
 
@@ -416,7 +493,7 @@ async function discoverJobs(interests, city, state, radius, partTime, env) {
       const pr = await fetchText(u, {}, budget);
       const d = { stage: "job-validation", url: u, ok: pr.ok, status: pr.status, accepted: 0, rejected: null };
       if (!pr.ok) { d.rejected = pr.error || `HTTP ${pr.status}`; diagnostics.push(d); continue; }
-      const found = parseJobs(pr.text, u, interests, city, state);
+      const found = parseJobs(pr.text, u, interests, city, state, radius);
       d.accepted = found.length; d.rejected = found.length ? null : "no validated local JobPosting/career opportunity"; diagnostics.push(d); items.push(...found);
     }
   }
@@ -453,7 +530,7 @@ async function discoverJobs(interests, city, state, radius, partTime, env) {
 }
 function buildJobQueries(interests, city, state) { const base = interestBase(interests).slice(0, 6), p = `"${city}" ${state}`; return [...new Set(base.map(x => `"${x}" ${p} (jobs OR careers OR employment OR hiring) -dance`))].slice(0, 6); }
 function buildUSAQueries(interests) { const src = interests.length ? interests : ["museum archaeology historic preservation", "welder fabrication woodworking", "bicycle mechanic", "parks recreation cultural resources"]; return [...new Set(src)].slice(0, 4); }
-function parseJobs(html, baseUrl, interests, city, state) {
+function parseJobs(html, baseUrl, interests, city, state, radius = 30) {
   const base = new URL(baseUrl), text = clean(html), jobs = [];
   const jsonld = [];
   for (const m of html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) { try { jsonld.push(...flattenJsonLd(JSON.parse(m[1].trim()))); } catch {} }
@@ -461,8 +538,10 @@ function parseJobs(html, baseUrl, interests, city, state) {
     const type = Array.isArray(x["@type"]) ? x["@type"].join(" ") : String(x["@type"] || ""); if (!/JobPosting/i.test(type) || !x.title) continue;
     const loc = formatLocation(x.jobLocation), org = typeof x.hiringOrganization === "object" ? x.hiringOrganization?.name || "" : x.hiringOrganization || "", combined = `${x.title} ${org} ${x.description || ""} ${loc}`;
     if (DANCE_RE.test(combined)) continue;
-    const geo = geographicEvidence(`${loc} ${x.description || ""}`, city, state); if (geo.score < 45) continue;
-    jobs.push({ id: key(x.title, x.url || base.href), title: clean(x.title), organization: clean(org), url: abs(x.url || base.href, base), description: clean(x.description || "").slice(0, 1100), date: x.datePosted || "", closeDate: x.validThrough || "", location: loc, employmentType: clean(x.employmentType || ""), source: "JSON-LD JobPosting", score: relevanceScore(combined, interests) + geo.score, type: "job", discoveryQuality: "verified", locationScore: geo.score });
+    const geo = geographicEvidence(`${loc} ${x.description || ""}`, city, state);
+    const distance = estimateDistance(`${city}, ${state}`, loc);
+    if (geo.score < 45 || (distance != null && distance > radius)) continue;
+    jobs.push({ id: key(x.title, x.url || base.href), title: clean(x.title), organization: clean(org), url: abs(x.url || base.href, base), description: clean(x.description || "").slice(0, 1100), date: x.datePosted || "", closeDate: x.validThrough || "", location: loc, employmentType: clean(x.employmentType || ""), source: "JSON-LD JobPosting", score: relevanceScore(combined, interests) + geo.score, type: "job", discoveryQuality: "verified", locationScore: geo.score, distanceMiles: distance });
   }
   // A career link by itself is intentionally NOT accepted as a job. This is the key 3.8 change.
   return dedupeBy(jobs, x => key(x.title, x.url));
@@ -476,3 +555,5 @@ async function diagnostics(env, requestPath) {
   const keyPresent = !!env?.USAJOBS_KEY, emailPresent = !!env?.USAJOBS_EMAIL;
   return { diagnostic: true, version: VERSION, build: BUILD, requestPath, architecture: "organization-first", secretBindings: { USAJOBS_KEY: keyPresent, USAJOBS_EMAIL: emailPresent }, connectivity: { Cloudflare: { ok: cf.ok, status: cf.status }, USAJOBS: { ok: uj.ok, status: uj.status } }, configuredFeeds: listEnv(env, "WORKER_FEEDS").length };
 }
+
+export { parseOrganizationPage, parseEvents, parseJobs, geographicEvidence, estimateDistance, parseHomeLocation };
