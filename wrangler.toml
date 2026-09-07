@@ -1,3 +1,3 @@
 name = "opportunity-finder-v2"
-main = "worker/index391.js"
+main = "worker/index.js"
 compatibility_date = "2026-09-07"
