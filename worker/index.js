@@ -55,8 +55,8 @@ export default {
   }
 };
 
-const VERSION = "3.9.1";
-const BUILD = "v3.9.1-jobs-source-priority";
+const VERSION = "3.9.2";
+const BUILD = "v3.9.2-trusted-event-sources";
 const SEARCH_LIMIT = 10;
 const PAGE_LIMIT = 72;
 
@@ -68,6 +68,10 @@ const BUILTIN_DISCOVERY_SEEDS = [
   "https://centuryvillagemuseum.org/",
   "https://www.trumbullcountyhistory.com/",
   "https://sites.google.com/trumbullcountyhistory.org/trumbull-history-hub/home/mesopotamia"
+];
+const BUILTIN_EVENT_SOURCES = [
+  { url: "https://centuryvillagemuseum.org/event/", name: "Century Village Museum" },
+  { url: "https://centuryvillagemuseum.org/events-calendar/", name: "Century Village Museum" }
 ];
 const DANCE_RE = /\bdance\b|dancing|ballroom|ballet|tap dance|jazz dance|dance studio|dance academy/i;
 const JUNK_HOST_RE = /(?:facebook|instagram|linkedin|youtube|tiktok|pinterest|x\.com|twitter|wikipedia|yelp|tripadvisor)\./i;
@@ -235,10 +239,23 @@ async function discover(interests, city, state, radius, env) {
 
   const anchors = dedupeOrganizations([...orgs, ...venues]);
 
-  // Stage 3: discover events from validated organization/venue anchors only.
-  // Reserve a separate event budget so event discovery can never consume the entire invocation.
-  const eventBudget = { used: 0, limit: Math.min(18, Math.max(0, budget.limit - budget.used)) };
+  // Stage 3: trusted event sources first, then validated organization/venue anchors.
+  // This makes event discovery resilient when search-engine results are sparse or noisy.
+  const eventBudget = { used: 0, limit: Math.min(24, Math.max(0, budget.limit - budget.used)) };
   const events = [];
+  const trustedEventSources = [...BUILTIN_EVENT_SOURCES, ...listEnv(env, "EVENT_SOURCES").map(url => ({ url, name: "configured event source" }))];
+  for (const source of trustedEventSources) {
+    if (eventBudget.used >= eventBudget.limit) break;
+    const pr = await fetchText(source.url, {}, eventBudget);
+    const d = { stage: "trusted-event-source", organization: source.name, url: source.url, ok: pr.ok, status: pr.status, accepted: 0, rejected: null };
+    if (!pr.ok) { d.rejected = pr.error || `HTTP ${pr.status}`; diagnostics.push(d); continue; }
+    const org = { name: source.name, url: source.url };
+    const found = parseEvents(pr.text, source.url, interests, city, state, org, radius);
+    d.accepted = found.events.length; d.rejected = found.events.length ? null : found.rejectReason;
+    diagnostics.push(d); events.push(...found.events);
+  }
+
+  // Supplemental event discovery from validated anchors.
   for (const org of anchors.slice(0, 8)) {
     if (eventBudget.used >= eventBudget.limit) break;
     for (const query of buildEventQueries(org, interests, city, state).slice(0, 2)) {
@@ -246,8 +263,7 @@ async function discover(interests, city, state, radius, env) {
       const r = await searchWeb(query, env, eventBudget);
       diagnostics.push({ stage: "event-search", organization: org.name, query, ok: r.ok, status: r.status, candidates: r.urls.length, milliseconds: r.milliseconds, bytes: r.bytes, error: r.ok ? null : r.error });
       for (const u of r.urls.slice(0, 4)) {
-        if (!acceptDiscoveryUrl(u, state)) continue;
-        if (eventBudget.used >= eventBudget.limit) break;
+        if (!acceptDiscoveryUrl(u, state) || eventBudget.used >= eventBudget.limit) continue;
         const pr = await fetchText(u, {}, eventBudget);
         const d = { stage: "event-validation", organization: org.name, url: u, ok: pr.ok, status: pr.status, accepted: 0, rejected: null };
         if (!pr.ok) { d.rejected = pr.error || `HTTP ${pr.status}`; diagnostics.push(d); continue; }
