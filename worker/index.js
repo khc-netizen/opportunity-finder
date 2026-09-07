@@ -56,7 +56,7 @@ export default {
 };
 
 const VERSION = "3.9.8";
-const BUILD = "v3.9.10-live-discovery-path";
+const BUILD = "v3.9.11-search-filter";
 const SEARCH_LIMIT = 10;
 const ORG_DISCOVERY_QUERY_LIMIT = 14;
 const ORG_VALIDATION_LIMIT = 18;
@@ -161,6 +161,7 @@ async function searchWeb(query, env, budget) {
     try {
       const x = new URL(href);
       if (JUNK_HOST_RE.test(x.hostname)) return;
+      if (LOW_VALUE_HOST_RE.test(x.hostname) || LOW_VALUE_PATH_RE.test(x.pathname)) return;
       if (FOREIGN_GOV_HOST_RE.test(x.hostname)) return;
       if (!urls.some(v => urlKey(v) === urlKey(x.href))) urls.push(x.href);
     } catch {}
