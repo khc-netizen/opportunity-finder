@@ -1,0 +1,27 @@
+name: Verify USAJOBS live
+on:
+  push:
+    branches: [main]
+jobs:
+  verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for Cloudflare deployment and verify
+        run: |
+          set -e
+          for i in $(seq 1 12); do
+            echo "Attempt $i/12"
+            TEST=$(curl -fsS --max-time 30 'https://opportunity-finder-v2.khc-comm.workers.dev/test' || true)
+            echo "$TEST"
+            BUILD=$(printf '%s' "$TEST" | python -c 'import json,sys; print(json.load(sys.stdin).get("build", ""))' 2>/dev/null || true)
+            if [ "$BUILD" = "v3.9.6-usajobs-auth-header-fix" ]; then
+              JOBS=$(curl -fsS --max-time 90 'https://opportunity-finder-v2.khc-comm.workers.dev/jobs?city=Mesopotamia&state=OH&radius=30&partTime=true&interests=museum,archaeology,welding,woodworking')
+              printf '%s' "$JOBS" | python -c 'import json,sys; j=json.load(sys.stdin); u=[x for x in j.get("diagnostics",[]) if x.get("stage")=="usajobs"]; print(json.dumps({"build":j.get("build"),"counts":j.get("counts"),"usa":u,"sources":sorted(set(x.get("source") for x in j.get("items",[]) if x.get("source")))},indent=2)); assert u and all(x.get("ok") and x.get("status")==200 for x in u), u'
+              echo 'USAJOBS LIVE VERIFICATION PASSED'
+              exit 0
+            fi
+            sleep 30
+          done
+          echo 'Timed out waiting for Cloudflare deployment'
+          exit 1
