@@ -28,8 +28,8 @@ jobs:
           for a,b in [(r'application\\/ld\\+json',r'application\/ld\+json'),(r'<\\/script>',r'<\/script>'),(r'\\s',r'\s'),(r'\\1',r'\1')]: mid=mid.replace(a,b)
           mid=mid.replace('if (DANCE_RE.test(combined)) continue;','if (DANCE_RE.test(combined) || AMISH_RE.test(combined)) continue;')
           mid=mid.replace('DANCE_RE.test(block) || ARTICLE_RE.test','DANCE_RE.test(block) || AMISH_RE.test(block) || ARTICLE_RE.test')
-          mid=mid.replace('<h[1-4][^>]*>','<h[1-6][^>]*>').replace('</h[1-4]>','</h[1-6]>')
           s=s[:start]+mid+s[end:]
+
           start=s.index('function parseJobs('); end=s.index('\nasync function diagnostics(',start); mid=s[start:end]
           for a,b in [(r'application\\/ld\\+json',r'application\/ld\+json'),(r'<\\/script>',r'<\/script>'),(r'\\s',r'\s'),(r'\\1',r'\1')]: mid=mid.replace(a,b)
           if 'const trusted =' not in mid:
@@ -39,7 +39,11 @@ jobs:
           mid=mid.replace('const geo = geographicEvidence(combined, city, state), distance = estimateDistance(`${city}, ${state}`, combined);','const geo = geographicEvidence(combined, city, state), distance = estimateDistance(`${city}, ${state}`, combined), localByCity = !!cityKey(combined);',1)
           mid=mid.replace('if (geo.score < 45 || (distance != null && distance > radius)) continue;','if ((geo.score < 45 && !(trusted && localByCity)) || (distance != null && distance > radius)) continue;',1)
           mid=mid.replace('DANCE_RE.test(`${title} ${block}`)','DANCE_RE.test(`${title} ${block}`) || AMISH_RE.test(`${title} ${block}`)')
-          mid=mid.replace('<h[1-4][^>]*>','<h[1-6][^>]*>').replace('</h[1-4]>','</h[1-6]>')
+          lines=mid.splitlines()
+          for i,line in enumerate(lines):
+              if 'for (const m of html.matchAll(/<(h[1-4])' in line and '5000' in line:
+                  lines[i]=r'  for (const m of html.matchAll(/<(h[1-6])[^>]*>([\s\S]*?)<\/\1>([\s\S]{0,7000}?)(?=<h[1-6][^>]*>|$)/gi)) {'
+          mid='\n'.join(lines)+'\n'
           s=s[:start]+mid+s[end:]
           p.write_text(s)
           PY
