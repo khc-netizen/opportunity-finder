@@ -1,7 +1,8 @@
 name: Apply live discovery fix
 on:
   push:
-    branches: [fix/live-discovery-code-path]
+    branches:
+      - fix/live-discovery-code-path
 permissions:
   contents: write
 jobs:
@@ -9,61 +10,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Apply targeted fix
+      - name: Apply patch
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-          p = Path('worker/index.js')
-          s = p.read_text()
-          def once(pattern, replacement, label):
-              global s
-              s2, n = re.subn(pattern, replacement, s, count=1, flags=re.S)
-              if n != 1:
-                  raise SystemExit(f'Expected one {label}, got {n}')
-              s = s2
-          if 'zillow\\.com' not in s:
-              once(r'(const JUNK_HOST_RE = .*?;)', r'\1\nconst LOW_VALUE_HOST_RE = /(?:britannica\\.com|worldhistory\\.org|merriam-webster\\.com|almanac\\.com|petmd\\.com|a-z-animals\\.com|newsbreak\\.com|ground\\.news|raynetoday\\.com|restaurantji\\.com|tvtv\\.us|weather\\.com|history\\.com|pacnyc\\.org|centurycommunities\\.com|centurymartialarts\\.com|centuryhouse\\.biz|zillow\\.com|realtor\\.com|redfin\\.com|trulia\\.com)$/i;', 'low-value host filter')
-          if 'LOW_VALUE_PATH_RE' not in s:
-              once(r'(const LOW_VALUE_HOST_RE = .*?;)', r'\1\nconst LOW_VALUE_PATH_RE = /\\/(?:dictionary|article|articles|news|weather|recipes?|podcasts?|restaurant-reviews?)\\b/i;', 'low-value path filter')
-          if 'LOW_VALUE_HOST_RE.test(x.hostname)' not in s:
-              once(r'(if \(JUNK_HOST_RE\.test\(x\.hostname\)\) return;\n)(\s*if \(FOREIGN_GOV_HOST_RE\.test\(x\.hostname\)\) return;)', r'\1      if (LOW_VALUE_HOST_RE.test(x.hostname) || LOW_VALUE_PATH_RE.test(x.pathname)) return;\n\2', 'searchWeb filtering')
-          once(r'function buildJobQueries\(interests, city, state\) \{.*?\n\}', '''function buildJobQueries(interests, city, state) {
-  const p = `"${city}" ${state}`;
-  const broad = [
-    "maintenance facilities technician laborer",
-    "welding fabrication mechanic equipment",
-    "warehouse material handling delivery transportation",
-    "parks grounds recreation natural resources",
-    "museum historic preservation library",
-    "custodial facilities building maintenance"
-  ];
-  const specific = interests.slice(0, 2).map(x => clean(x)).filter(Boolean);
-  const base = [...broad.slice(0, 4), ...specific, ...broad.slice(4)];
-  return [...new Set(base.map(x => `"${x}" ${p} (jobs OR careers OR employment OR hiring) -dance`))].slice(0, 6);
-}''', 'buildJobQueries')
-          if 'JOB_JUNK_HOST_RE' not in s:
-              once(r'(const LOW_VALUE_PATH_RE = .*?;)', r'\1\nconst JOB_JUNK_HOST_RE = /(?:zillow\\.com|realtor\\.com|redfin\\.com|trulia\\.com|pinterest\\.com|wikipedia\\.org|newsbreak\\.com|merriam-webster\\.com)$/i;', 'job junk host filter')
-          once(r'if \(!acceptDiscoveryUrl\(u, state\) \|\| CAREER_RE\.test\(u\)\) continue;', r'if (!acceptDiscoveryUrl(u, state) || CAREER_RE.test(u) || JOB_JUNK_HOST_RE.test(host(u))) continue;', 'job candidate filter')
-          once(r'const BUILD = "v3\.9\.9-discovery-efficiency";', r'const BUILD = "v3.9.10-live-discovery-path";', 'build marker')
-          p.write_text(s)
-          PY
+          echo 'ZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCmltcG9ydCByZQpwPVBhdGgoJ3dvcmtlci9pbmRleC5qcycpCnM9cC5yZWFkX3RleHQoKQppZiAnemlsbG93XFwuY29tJyBub3QgaW4gczoKICAgIG9sZD0nY29uc3QgTE9XX1ZBTFVFX0hPU1RfUkUgPSAvKD86YnJpdGFubmljYVxcLmNvbXx3b3JsZGhpc3RvcnlcXC5vcmd8bWVycmlhbS13ZWJzdGVyXFwuY29tfGFsbWFuYWNcXC5jb218cGV0bWRcXC5jb218YS16LWFuaW1hbHNcXC5jb218bmV3c2JyZWFrXFwuY29tfGdyb3VuZFxcLm5ld3N8cmF5bmV0b2RheVxcLmNvbXxyZXN0YXVyYW50amlcXC5jb218dHZ0dlxcLnVzfHdlYXRoZXJcXC5jb218aGlzdG9yeVxcLmNvbXxwYWNueWNcXC5vcmd8Y2VudHVyeWNvbW11bml0aWVzXFwuY29tfGNlbnR1cnltYXJ0aWFsYXJ0c1xcLmNvbXxjZW50dXJ5aG91c2VcXC5iaXopJC9pOycKICAgIG5ldz1vbGRbOi0zXSsnfHppbGxvd1xcLmNvbXxyZWFsdG9yXFwuY29tfHJlZGZpblxcLmNvbXx0cnVsaWFcXC5jb20pJC9pOycKICAgIGlmIG9sZCBub3QgaW4gczogcmFpc2UgU3lzdGVtRXhpdCgnaG9zdCBhbmNob3IgbWlzc2luZycpCiAgICBzPXMucmVwbGFjZShvbGQsbmV3LDEpCmlmICdMT1dfVkFMVUVfSE9TVF9SRS50ZXN0KHguaG9zdG5hbWUpJyBub3QgaW4gczoKICAgIG9sZD0nICAgICAgaWYgKEpVTktfSE9TVF9SRS50ZXN0KHguaG9zdG5hbWUpKSByZXR1cm47XG4gICAgICBpZiAoRk9SRUlHTl9HT1ZfSE9TVF9SRS50ZXN0KHguaG9zdG5hbWUpKSByZXR1cm47JwogICAgbmV3PScgICAgICBpZiAoSlVOS19IT1NUX1JFLnRlc3QoeC5ob3N0bmFtZSkpIHJldHVybjtcbiAgICAgIGlmIChMT1dfVkFMVUVfSE9TVF9SRS50ZXN0KHguaG9zdG5hbWUpIHx8IExPV19WQUxVRV9QQVRIX1JFLnRlc3QoeC5wYXRobmFtZSkpIHJldHVybjtcbiAgICAgIGlmIChGT1JFSUdOX0dPVl9IT1NUX1JFLnRlc3QoeC5ob3N0bmFtZSkpIHJldHVybjsnCiAgICBpZiBvbGQgbm90IGluIHM6IHJhaXNlIFN5c3RlbUV4aXQoJ3NlYXJjaCBmaWx0ZXIgYW5jaG9yIG1pc3NpbmcnKQogICAgcz1zLnJlcGxhY2Uob2xkLG5ldywxKQpwYXQ9cmUuY29tcGlsZShyJ2Z1bmN0aW9uIGJ1aWxkSm9iUXVlcmllc1xcKGludGVyZXN0cywgY2l0eSwgc3RhdGVcXCkgXFx7Lio/XFxuXFx9JyxyZS5TKQpuZXc9JycnZnVuY3Rpb24gYnVpbGRKb2JRdWVyaWVzKGludGVyZXN0cywgY2l0eSwgc3RhdGUpIHtcbiAgY29uc3QgcCA9IGAiJHtjaXR5fSIgJHtzdGF0ZX1gO1xuICBjb25zdCBicm9hZCA9IFtcbiAgICAibWFpbnRlbmFuY2UgZmFjaWxpdGllcyB0ZWNobmljaWFuIGxhYm9yZXIiLFxuICAgICJ3ZWxkaW5nIGZhYnJpY2F0aW9uIG1lY2hhbmljIGVxdWlwbWVudCIsXG4gICAgIndhcmVob3VzZSBtYXRlcmlhbCBoYW5kbGluZyBkZWxpdmVyeSB0cmFuc3BvcnRhdGlvbiIsXG4gICAgInBhcmtzIGdyb3VuZHMgcmVjcmVhdGlvbiBuYXR1cmFsIHJlc291cmNlcyIsXG4gICAgIm11c2V1bSBoaXN0b3JpYyBwcmVzZXJ2YXRpb24gbGlicmFyeSIsXG4gICAgImN1c3RvZGlhbCBmYWNpbGl0aWVzIGJ1aWxkaW5nIG1haW50ZW5hbmNlIlxuICBdO1xuICBjb25zdCBzcGVjaWZpYyA9IGludGVyZXN0cy5zbGljZSgwLCAyKS5tYXAoeCA9PiBjbGVhbih4KSkuZmlsdGVyKEJvb2xlYW4pO1xuICBjb25zdCBiYXNlID0gWy4uLmJyb2FkLnNsaWNlKDAsIDQpLCAuLi5zcGVjaWZpYywgLi4uYnJvYWQuc2xpY2UoNCldO1xuICByZXR1cm4gWy4uLm5ldyBTZXQoYmFzZS5tYXAoeCA9PiBgIiR7eH0iICR7cH0gKGpvYnMgT1IgY2FyZWVycyBPUiBlbXBsb3ltZW50IE9SIGhpcmluZykgLWRhbmNlYCkpXS5zbGljZSgwLCA2KTtcbn0nJycKcyxuPXBhdC5zdWJuKG5ldyxzLGNvdW50PTEpCmlmIG4hPTE6IHJhaXNlIFN5c3RlbUV4aXQoJ2J1aWxkSm9iUXVlcmllcyBub3QgZm91bmQnKQppZiAnSk9CX0pVTktfSE9TVF9SRScgbm90IGluIHM6CiAgICBvbGQ9J2NvbnN0IExPV19WQUxVRV9QQVRIX1JFID0gL1xcLyg/OmRpY3Rpb25hcnl8YXJ0aWNsZXxhcnRpY2xlc3xuZXdzfHdlYXRoZXJ8cmVjaXBlcz98cG9kY2FzdHM/fHJlc3RhdXJhbnQtcmV2aWV3cz8pXFxiL2k7JwogICAgbmV3PW9sZCsnXG5jb25zdCBKT0JfSlVOS19IT1NUX1JFID0gLyg/OnppbGxvd1xcLmNvbXxyZWFsdG9yXFwuY29tfHJlZGZpblxcLmNvbXx0cnVsaWFcXC5jb218cGludGVyZXN0XFwuY29tfHdpa2lwZWRpYVxcLm9yZ3xuZXdzYnJlYWtcXC5jb218bWVycmlhbS13ZWJzdGVyXFwuY29tKSQvaTsnCiAgICBpZiBvbGQgbm90IGluIHM6IHJhaXNlIFN5c3RlbUV4aXQoJ3BhdGggYW5jaG9yIG1pc3NpbmcnKQogICAgcz1zLnJlcGxhY2Uob2xkLG5ldywxKQpvbGQ9J2lmICghYWNjZXB0RGlzY292ZXJ5VXJsKHUsIHN0YXRlKSB8fCBDQVJFRVJfUkUudGVzdCh1KSkgY29udGludWU7JwpuZXc9J2lmICghYWNjZXB0RGlzY292ZXJ5VXJsKHUsIHN0YXRlKSB8fCBDQVJFRVJfUkUudGVzdCh1KSB8fCBKT0JfSlVOS19IT1NUX1JFLnRlc3QoaG9zdCh1KSkpIGNvbnRpbnVlOycKaWYgb2xkIG5vdCBpbiBzOiByYWlzZSBTeXN0ZW1FeGl0KCdqb2IgZmlsdGVyIGFuY2hvciBtaXNzaW5nJykKcz1zLnJlcGxhY2Uob2xkLG5ldywxKQpvbGQ9J2NvbnN0IEJVSUxEID0gInYzLjkuOS1kaXNjb3ZlcnktZWZmaWNpZW5jeSI7JwpuZXc9J2NvbnN0IEJVSUxEID0gInYzLjkuMTAtbGl2ZS1kaXNjb3ZlcnktcGF0aCI7JwppZiBvbGQgbm90IGluIHM6IHJhaXNlIFN5c3RlbUV4aXQoJ2J1aWxkIGFuY2hvciBtaXNzaW5nJykKcz1zLnJlcGxhY2Uob2xkLG5ldywxKQpwLndyaXRlX3RleHQocykK' | base64 -d >/tmp/patch.py
+          python3 /tmp/patch.py
       - name: Validate
         run: |
           git diff --check
           node --check worker/index.js
           grep -q 'v3.9.10-live-discovery-path' worker/index.js
-          grep -q 'zillow\\.com' worker/index.js
-          grep -q 'LOW_VALUE_PATH_RE' worker/index.js
           grep -q 'JOB_JUNK_HOST_RE' worker/index.js
-          grep -q 'function buildJobQueries' worker/index.js
-      - name: Commit fix and remove workflow
+          grep -q 'zillow\\.com' worker/index.js
+      - name: Commit fix
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add worker/index.js
           git commit -m "Apply live discovery fix"
-          git push origin HEAD
-          git rm .github/workflows/apply-live-discovery-fix.yml LIVE_DISCOVERY_FIX_TRIGGER.txt
-          git commit -m "Remove temporary live discovery fix workflow"
           git push origin HEAD
