@@ -1,0 +1,15 @@
+name: Inspect USAJOBS implementation
+on:
+  push:
+    branches: [main]
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show USAJOBS code
+        run: |
+          echo '--- USAJOBS references ---'
+          grep -n -i -E 'USAJOBS|usajobs|Authorization-Key|authorization-key' worker/index.js || true
+          echo '--- likely function blocks ---'
+          grep -n -i -B8 -A80 -E 'USAJOBS|usajobs' worker/index.js || true
