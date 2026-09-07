@@ -19,7 +19,7 @@ jobs:
           diag=$(curl -fsSL --max-time 30 'https://opportunity-finder-v2.khc-comm.workers.dev/test')
           echo "$diag"
           echo "$diag" | grep -q '"version": "3.9.6"'
-          echo "$diag" | grep -q 'neo-rls-geographic-validation-final'
+          echo "$diag" | grep -q 'neo-rls-geographic-validation-final2'
           curl -fsSL --max-time 90 -o /tmp/jobs.json 'https://opportunity-finder-v2.khc-comm.workers.dev/jobs?interests=museum%2Cartifact%20conservation%2Chistoric%20preservation%2Carchaeology%2Cbike%20mechanic%2Cwelding%2Cfabrication%2Cwoodworking%2Cartisan%2Ccrafts&home=Mesopotamia%2C%20Ohio&city=Mesopotamia&state=OH&radius=30&partTime=true'
           cat /tmp/jobs.json
           grep -q 'NEO-RLS' /tmp/jobs.json
