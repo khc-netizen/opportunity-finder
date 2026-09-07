@@ -55,8 +55,8 @@ export default {
   }
 };
 
-const VERSION = "3.9.2";
-const BUILD = "v3.9.2-trusted-event-sources";
+const VERSION = "3.9.3";
+const BUILD = "v3.9.3-local-job-and-event-parser";
 const SEARCH_LIMIT = 10;
 const PAGE_LIMIT = 72;
 
@@ -76,6 +76,7 @@ const BUILTIN_EVENT_SOURCES = [
 const DANCE_RE = /\bdance\b|dancing|ballroom|ballet|tap dance|jazz dance|dance studio|dance academy/i;
 const JUNK_HOST_RE = /(?:facebook|instagram|linkedin|youtube|tiktok|pinterest|x\.com|twitter|wikipedia|yelp|tripadvisor)\./i;
 const ARTICLE_RE = /\b(?:news|newspaper|journalism|press release|obituary|podcast|radio|weather|scoreboard|politics|election|recipe|restaurant review|blog post)\b/i;
+const AMISH_RE = /\bamish\b|\bamish[- ]owned\b|\bamish[- ]run\b/i;
 const CAREER_RE = /(?:career|careers|jobs|employment|work with us|join our team|job openings|opportunities)/i;
 const ORG_RE = /(?:association|society|club|guild|chapter|council|league|organization|organisation|foundation|historical society|heritage|museum|library|conservancy|preservation|collective|fellowship|alliance|coalition|volunteer group|chapter)/i;
 const ORG_IDENTITY_RE = /(?:association|society|club|guild|chapter|council|league|organization|organisation|foundation|conservancy|preservation|collective|fellowship|alliance|coalition|volunteer group)/i;
@@ -482,7 +483,7 @@ function parseEvents(html, baseUrl, interests, city, state, org, radius = 75) {
     const type = Array.isArray(x["@type"]) ? x["@type"].join(" ") : String(x["@type"] || "");
     if (!/Event/i.test(type) || !x.name) continue;
     const location = formatLocation(x.location), combined = `${x.name} ${x.description || ""} ${location} ${typeof x.organizer === "object" ? x.organizer?.name || "" : x.organizer || ""}`;
-    if (DANCE_RE.test(combined)) continue;
+    if (DANCE_RE.test(combined) || AMISH_RE.test(combined)) continue;
     const geo = geographicEvidence(combined + " " + text.slice(0, 8000), city, state);
     const distance = estimateDistance(`${city}, ${state}`, location);
     if (geo.score < 45 || (distance != null && distance > radius)) continue;
@@ -493,7 +494,7 @@ function parseEvents(html, baseUrl, interests, city, state, org, radius = 75) {
   for (const m of html.matchAll(/<(article|li|div|section)[^>]*>([\s\S]*?)<\/\1>/gi)) {
     const block = clean(m[2]);
     const date = findDate(block);
-    if (!date || !EVENT_RE.test(block) || DANCE_RE.test(block) || ARTICLE_RE.test(block.slice(0, 500))) continue;
+    if (!date || !EVENT_RE.test(block) || DANCE_RE.test(block) || AMISH_RE.test(block) || ARTICLE_RE.test(block.slice(0, 500))) continue;
     const geo = geographicEvidence(block + " " + text.slice(0, 5000), city, state);
     const location = extractLocation(block, city, state);
     const distance = estimateDistance(`${city}, ${state}`, location);
@@ -547,7 +548,7 @@ async function discoverJobs(interests, city, state, radius, partTime, env) {
         const geo = geographicEvidence(loc, city, state), distance = estimateDistance(`${city}, ${state}`, loc);
         if (geo.score < 45 || (distance != null && distance > radius)) continue;
         const combined = `${d.PositionTitle || ""} ${d.OrganizationName || ""} ${d.UserArea?.Details?.JobSummary || ""} ${loc}`;
-        if (DANCE_RE.test(combined)) continue;
+        if (DANCE_RE.test(combined) || AMISH_RE.test(combined)) continue;
         items.push({ id: key(d.PositionID || d.PositionTitle, d.PositionURI || url.href), title: d.PositionTitle || "USAJOBS opportunity", organization: d.OrganizationName || "", url: d.PositionURI || "https://www.usajobs.gov/", description: clean(d.UserArea?.Details?.JobSummary || "").slice(0, 1100), date: d.PublicationStartDate || "", closeDate: d.ApplicationCloseDate || "", location: loc, employmentType: d.PositionScheduleType?.[0]?.Name || "", source: "USAJOBS", score: relevanceScore(combined, interests) + geo.score, type: "job", discoveryQuality: "verified", locationScore: geo.score, distanceMiles: distance });
       }
     } catch (e) { diagnostics.push({ stage: "usajobs-parse", query, ok: false, rejected: errorMessage(e) }); }
@@ -574,35 +575,36 @@ function buildJobQueries(interests, city, state) { const base = interestBase(int
 function buildUSAQueries(interests) { const src = interests.length ? interests : ["museum archaeology historic preservation", "welder fabrication woodworking", "bicycle mechanic", "parks recreation cultural resources"]; return [...new Set(src)].slice(0, 4); }
 function parseJobs(html, baseUrl, interests, city, state, radius = 30, options = {}) {
   const base = new URL(baseUrl), text = clean(html), jobs = [], jsonld = [];
-  for (const m of html.matchAll(/<script[^>]+type=["']application\\/ld\\+json["'][^>]*>([\\s\\S]*?)<\\/script>/gi)) { try { jsonld.push(...flattenJsonLd(JSON.parse(m[1].trim()))); } catch {} }
+  const trusted = /neo-rls\.org/i.test(base.hostname) || /trusted job source/i.test(options.source || "");
+  for (const m of html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\\S]*?)<\/script>/gi)) { try { jsonld.push(...flattenJsonLd(JSON.parse(m[1].trim()))); } catch {} }
   for (const x of jsonld) {
     const type = Array.isArray(x["@type"]) ? x["@type"].join(" ") : String(x["@type"] || "");
     if (!/JobPosting/i.test(type) || !x.title) continue;
     const loc = formatLocation(x.jobLocation), org = typeof x.hiringOrganization === "object" ? x.hiringOrganization?.name || "" : x.hiringOrganization || "", combined = `${x.title} ${org} ${x.description || ""} ${loc}`;
-    if (DANCE_RE.test(combined)) continue;
-    const geo = geographicEvidence(`${loc} ${x.description || ""}`, city, state), distance = estimateDistance(`${city}, ${state}`, loc);
-    if (geo.score < 45 || (distance != null && distance > radius)) continue;
+    if (DANCE_RE.test(combined) || AMISH_RE.test(combined)) continue;
+    const geo = geographicEvidence(`${loc} ${x.description || ""}`, city, state), distance = estimateDistance(`${city}, ${state}`, loc), localByCity = !!cityKey(loc);
+    if ((geo.score < 45 && !(trusted && localByCity)) || (distance != null && distance > radius)) continue;
     if (options.partTime && !partTimeMatch(x)) continue;
     jobs.push({ id: key(x.title, x.url || base.href), title: clean(x.title), organization: clean(org), url: abs(x.url || base.href, base), description: clean(x.description || "").slice(0, 1100), date: x.datePosted || "", closeDate: x.validThrough || "", location: loc, employmentType: clean(x.employmentType || ""), source: options.source || "JSON-LD JobPosting", score: relevanceScore(combined, interests) + geo.score, type: "job", discoveryQuality: "verified", locationScore: geo.score, distanceMiles: distance });
   }
-  for (const m of html.matchAll(/<(h[1-4])[^>]*>([\\s\\S]*?)<\\/\\1>([\\s\\S]{0,5000}?)(?=<h[1-4][^>]*>|$)/gi)) {
+  for (const m of html.matchAll(/<(h[1-6])[^>]*>([\s\S]*?)<\/\1>([\s\S]{0,7000}?)(?=<h[1-6][^>]*>|$)/gi)) {
     const title = clean(m[2]), block = clean(m[3]);
-    if (!looksLikeJobTitle(title) || !block || DANCE_RE.test(`${title} ${block}`)) continue;
+    if (!looksLikeJobTitle(title) || !block || DANCE_RE.test(`${title} ${block}`) || AMISH_RE.test(`${title} ${block}`)) continue;
     const combined = `${title} ${block}`;
     if (CAREER_RE.test(title) && !/(part[- ]?time|full[- ]?time|hours?|salary|wage|apply|position|job)/i.test(block)) continue;
-    const geo = geographicEvidence(combined, city, state), distance = estimateDistance(`${city}, ${state}`, combined);
-    if (geo.score < 45 || (distance != null && distance > radius)) continue;
-    if (options.partTime && !/(part[- ]?time|\\b\\d{1,2}\\s*(?:-|to)\\s*\\d{1,2}\\s*hours?\\b|20\\s*hours?|32\\s*hours?|\\bpart time\\b)/i.test(combined)) continue;
+    const geo = geographicEvidence(combined, city, state), distance = estimateDistance(`${city}, ${state}`, combined), localByCity = !!cityKey(combined);
+    if ((geo.score < 45 && !(trusted && localByCity)) || (distance != null && distance > radius)) continue;
+    if (options.partTime && !/(part[- ]?time|\\b\\d{1,2}\s*(?:-|to)\s*\\d{1,2}\s*hours?\\b|20\s*hours?|32\s*hours?|\\bpart time\\b)/i.test(combined)) continue;
     const date = findDate(combined), url = base.href;
     jobs.push({ id: key(title, url + "#" + date), title, organization: extractJobOrganization(combined), url, description: block.slice(0, 1100), date, closeDate: findCloseDate(combined), location: extractJobLocation(combined, city, state), employmentType: /part[- ]?time/i.test(combined) ? "Part-time" : /full[- ]?time/i.test(combined) ? "Full-time" : "", source: options.source || "validated job block", score: relevanceScore(combined, interests) + geo.score, type: "job", discoveryQuality: "verified", locationScore: geo.score, distanceMiles: distance });
   }
   return dedupeBy(jobs, x => key(x.title, x.url));
 }
 function looksLikeJobTitle(t) { return t.length >= 5 && t.length <= 180 && !/^(view job postings|job seekers|category|keyword|home|services|about)$/i.test(t) && !EVENT_RE.test(t); }
-function partTimeMatch(x) { return /part[- ]?time|20\\s*hours?|32\\s*hours?|hourly/i.test(`${x.employmentType || ""} ${x.description || ""}`); }
-function extractJobOrganization(t) { const m=t.match(/(?:at|for)\\s+([A-Z][A-Za-z0-9&'’ .-]{2,100})(?:\\s+(?:is|has|seeks|seeking|located|in)\\b|$)/); return m ? clean(m[1]) : ""; }
+function partTimeMatch(x) { return /part[- ]?time|20\s*hours?|32\s*hours?|hourly/i.test(`${x.employmentType || ""} ${x.description || ""}`); }
+function extractJobOrganization(t) { const m=t.match(/(?:at|for)\s+([A-Z][A-Za-z0-9&'’ .-]{2,100})(?:\s+(?:is|has|seeks|seeking|located|in)\\b|$)/); return m ? clean(m[1]) : ""; }
 function extractJobLocation(t, city, state) { const m=t.match(new RegExp(`.{0,100}\\\\b${escapeRe(city)}\\\\b.{0,100}`, "i")); return clean(m ? m[0] : `${city}, ${state}`); }
-function findCloseDate(t) { const m=t.match(/(?:closes?|deadline|expires?|application close(?:s)?)[^\\d]{0,30}(\\b(?:20\\d{2}[-/]\\d{1,2}[-/]\d{1,2}|\\d{1,2}[/-]\\d{1,2}[/-]20\\d{2}|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\\s+\\d{1,2}(?:,\\s*20\\d{2})?))/i); return m ? m[1] : ""; }
+function findCloseDate(t) { const m=t.match(/(?:closes?|deadline|expires?|application close(?:s)?)[^\\d]{0,30}(\\b(?:20\\d{2}[-/]\\d{1,2}[-/]\d{1,2}|\\d{1,2}[/-]\\d{1,2}[/-]20\\d{2}|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\\d{1,2}(?:,\s*20\\d{2})?))/i); return m ? m[1] : ""; }
 
 async function diagnostics(env, requestPath) {
   const cf = await fetchText("https://www.cloudflare.com/"), uj = await fetchText("https://data.usajobs.gov/api/codelist/positionscheduletypes");
