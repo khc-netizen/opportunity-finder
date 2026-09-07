@@ -1,21 +1,23 @@
-name: Temporary NEO-RLS fix
+name: Repair NEO-RLS geographic validation
 
 on:
   push:
     branches: [main]
+    paths:
+      - '.github/workflows/fix-3.9.4-workflow.yml'
 
 permissions:
   contents: write
 
 jobs:
-  fix:
+  repair:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
-      - name: Patch NEO-RLS geographic acceptance
+      - name: Patch NEO-RLS acceptance rule
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -24,25 +26,27 @@ jobs:
           old = 'if (geo.score < 45 || (distance != null && distance > radius)) continue;'
           new = 'if ((geo.score < 45 && distance == null) || (distance != null && distance > radius)) continue;'
           if old not in s:
-              raise SystemExit('target geographic acceptance condition not found')
+              raise SystemExit('Expected NEO-RLS geographic acceptance rule was not found')
           s = s.replace(old, new, 1)
           s = s.replace('const VERSION = "3.9.5";', 'const VERSION = "3.9.6";', 1)
           s = s.replace('const BUILD = "v3.9.5-source-specific-job-event-repair";', 'const BUILD = "v3.9.6-neo-rls-geographic-acceptance";', 1)
           p.write_text(s)
           PY
           node --check worker/index.js
-      - name: Live NEO-RLS parser test
+      - name: Test against live NEO-RLS
         run: |
           node --input-type=module <<'JS'
           import { parseNeoRlsJobs } from './worker/index.js';
           const r = await fetch('https://www.neo-rls.org/view_job_postings.php');
           const html = await r.text();
           const jobs = parseNeoRlsJobs(html, 'https://www.neo-rls.org/view_job_postings.php', ['museum','artifact conservation','historic preservation','archaeology','bike mechanic','welding','fabrication','woodworking','artisan','crafts'], 'Mesopotamia', 'OH', 30, {source:'NEO-RLS',partTime:true});
-          console.log('NEO-RLS live HTTP', r.status, 'bytes', html.length, 'parsed jobs', jobs.length);
+          console.log('NEO-RLS HTTP', r.status, 'bytes', html.length, 'parsed jobs', jobs.length);
           for (const j of jobs) console.log(j.title, '|', j.location, '|', j.distanceMiles, 'mi');
-          if (jobs.length === 0) throw new Error('Live NEO-RLS parser returned zero jobs');
+          if (jobs.length < 2) throw new Error('Expected at least 2 local part-time NEO-RLS jobs');
+          if (!jobs.some(j => /Warren/i.test(j.title + ' ' + j.location))) throw new Error('Expected a Warren listing');
+          if (!jobs.some(j => /Garrettsville/i.test(j.title + ' ' + j.location))) throw new Error('Expected a Garrettsville listing');
           JS
-      - name: Commit fix
+      - name: Commit validated repair
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
