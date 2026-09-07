@@ -327,7 +327,7 @@ function parseOrganizationPage(html, baseUrl, interests, city, state, venueMode 
   if (ORG_RE.test(identityText)) evidence.push("organization-language");
   if (VENUE_RE.test(identityText)) evidence.push("venue-language");
   if (LOCAL_REGION_RE.test(text.slice(0, 10000))) evidence.push("regional-language");
-  if (new RegExp(`\\b${escapeRe(city)}\\b`, "i").test(text)) evidence.push("city-name");
+  if (new RegExp(`\b${escapeRe(city)}\b`, "i").test(text)) evidence.push("city-name");
   if (DANCE_RE.test(`${title} ${desc}`)) return { organizations: [], evidence, rejectReason: "dance exclusion" };
   if (ARTICLE_RE.test(title) && !ORG_RE.test(`${title} ${desc}`)) return { organizations: [], evidence, rejectReason: "article/publisher page" };
 
@@ -345,7 +345,7 @@ function parseOrganizationPage(html, baseUrl, interests, city, state, venueMode 
   const localEvidence = geographicEvidence(combined, city, state);
   const distance = estimateDistance(`${city}, ${state}`, `${structuredText} ${text.slice(0, 12000)}`);
   if (distance != null && distance > radius) return { organizations: [], evidence, rejectReason: `outside requested radius (${distance} mi)` };
-  if (hardOutOfArea(combined, city, state) && !new RegExp(`\\b${escapeRe(city)}\\b`, "i").test(combined)) return { organizations: [], evidence, rejectReason: "page contains a contradictory out-of-area location" };
+  if (hardOutOfArea(combined, city, state) && !new RegExp(`\b${escapeRe(city)}\b`, "i").test(combined)) return { organizations: [], evidence, rejectReason: "page contains a contradictory out-of-area location" };
   if (!validIdentityEvidence || localEvidence.score < 45) {
     return { organizations: [], evidence, rejectReason: !validIdentityEvidence ? "insufficient organization/venue evidence" : "insufficient geographic evidence" };
   }
@@ -432,7 +432,7 @@ const CITY_COORDS = {
 function cityKey(text) {
   const t = norm(text);
   for (const k of Object.keys(CITY_COORDS).sort((a,b) => b.length - a.length)) {
-    if (new RegExp(`\\b${escapeRe(k.split(",")[0])}\\b`, "i").test(t)) return k;
+    if (new RegExp(`\b${escapeRe(k.split(",")[0])}\b`, "i").test(t)) return k;
   }
   return null;
 }
@@ -453,7 +453,7 @@ function geographicEvidence(text, city, state) {
     const hasOhio = /\bohio\b/.test(t);
     const hasOhioAbbr = /\boh\b/.test(t);
     const hasState = hasOhio || hasOhioAbbr;
-    const hasCity = city ? new RegExp(`\\b${escapeRe(norm(city))}\\b`, "i").test(t) : false;
+    const hasCity = city ? new RegExp(`\b${escapeRe(norm(city))}\b`, "i").test(t) : false;
     const hasCountyOrRegion = /\b(?:trumbull county|trumbull|warren|northeast ohio|geauga county|geauga|portage county|portage|ashtabula county|ashtabula|mahoning county|mahoning|columbiana county|columbiana|summit county|summit|lake county|lake|cuyahoga county|cuyahoga)\b/.test(t);
     let score = 0;
     // The city name alone is deliberately NOT local evidence because "Mesopotamia" is also an ancient region.
@@ -463,12 +463,12 @@ function geographicEvidence(text, city, state) {
     return { score: Math.min(100, score), hasOhio, hasOhioAbbr, hasState, hasCity, hasCountyOrRegion };
   }
   const wantedState = norm(state);
-  const hasState = wantedState && new RegExp(`\\b${escapeRe(wantedState)}\\b`, "i").test(t);
-  const hasCity = city ? new RegExp(`\\b${escapeRe(norm(city))}\\b`, "i").test(t) : false;
+  const hasState = wantedState && new RegExp(`\b${escapeRe(wantedState)}\b`, "i").test(t);
+  const hasCity = city ? new RegExp(`\b${escapeRe(norm(city))}\b`, "i").test(t) : false;
   return { score: (hasState ? 50 : 0) + (hasCity && hasState ? 50 : 0), hasState, hasCity };
 }
 function extractLocation(text, city, state) {
-  const m = text.match(new RegExp(`.{0,80}\\b${escapeRe(city)}\\b.{0,80}`, "i"));
+  const m = text.match(new RegExp(`.{0,80}\b${escapeRe(city)}\b.{0,80}`, "i"));
   return clean(m ? m[0] : `${city}, ${state}`);
 }
 function escapeRe(s) { return String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
@@ -594,7 +594,7 @@ function parseJobs(html, baseUrl, interests, city, state, radius = 30, options =
     if (CAREER_RE.test(title) && !/(part[- ]?time|full[- ]?time|hours?|salary|wage|apply|position|job)/i.test(block)) continue;
     const geo = geographicEvidence(combined, city, state), distance = estimateDistance(`${city}, ${state}`, combined), localByCity = !!cityKey(combined);
     if ((geo.score < 45 && !(trusted && localByCity)) || (distance != null && distance > radius)) continue;
-    if (options.partTime && !/(part[- ]?time|\\b\\d{1,2}\s*(?:-|to)\s*\\d{1,2}\s*hours?\\b|20\s*hours?|32\s*hours?|\\bpart time\\b)/i.test(combined)) continue;
+    if (options.partTime && !/(part[- ]?time|\b\d{1,2}\s*(?:-|to)\s*\d{1,2}\s*hours?\b|20\s*hours?|32\s*hours?|\bpart time\b)/i.test(combined)) continue;
     const date = findDate(combined), url = base.href;
     jobs.push({ id: key(title, url + "#" + date), title, organization: extractJobOrganization(combined), url, description: block.slice(0, 1100), date, closeDate: findCloseDate(combined), location: extractJobLocation(combined, city, state), employmentType: /part[- ]?time/i.test(combined) ? "Part-time" : /full[- ]?time/i.test(combined) ? "Full-time" : "", source: options.source || "validated job block", score: relevanceScore(combined, interests) + geo.score, type: "job", discoveryQuality: "verified", locationScore: geo.score, distanceMiles: distance });
   }
@@ -602,9 +602,9 @@ function parseJobs(html, baseUrl, interests, city, state, radius = 30, options =
 }
 function looksLikeJobTitle(t) { return t.length >= 5 && t.length <= 180 && !/^(view job postings|job seekers|category|keyword|home|services|about)$/i.test(t) && !EVENT_RE.test(t); }
 function partTimeMatch(x) { return /part[- ]?time|20\s*hours?|32\s*hours?|hourly/i.test(`${x.employmentType || ""} ${x.description || ""}`); }
-function extractJobOrganization(t) { const m=t.match(/(?:at|for)\s+([A-Z][A-Za-z0-9&'’ .-]{2,100})(?:\s+(?:is|has|seeks|seeking|located|in)\\b|$)/); return m ? clean(m[1]) : ""; }
-function extractJobLocation(t, city, state) { const m=t.match(new RegExp(`.{0,100}\\\\b${escapeRe(city)}\\\\b.{0,100}`, "i")); return clean(m ? m[0] : `${city}, ${state}`); }
-function findCloseDate(t) { const m=t.match(/(?:closes?|deadline|expires?|application close(?:s)?)[^\\d]{0,30}(\\b(?:20\\d{2}[-/]\\d{1,2}[-/]\d{1,2}|\\d{1,2}[/-]\\d{1,2}[/-]20\\d{2}|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\\d{1,2}(?:,\s*20\\d{2})?))/i); return m ? m[1] : ""; }
+function extractJobOrganization(t) { const m=t.match(/(?:at|for)\s+([A-Z][A-Za-z0-9&'’ .-]{2,100})(?:\s+(?:is|has|seeks|seeking|located|in)\b|$)/); return m ? clean(m[1]) : ""; }
+function extractJobLocation(t, city, state) { const m=t.match(new RegExp(`.{0,100}\\\b${escapeRe(city)}\\\b.{0,100}`, "i")); return clean(m ? m[0] : `${city}, ${state}`); }
+function findCloseDate(t) { const m=t.match(/(?:closes?|deadline|expires?|application close(?:s)?)[^\d]{0,30}(\b(?:20\d{2}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[/-]\d{1,2}[/-]20\d{2}|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:,\s*20\d{2})?))/i); return m ? m[1] : ""; }
 
 async function diagnostics(env, requestPath) {
   const cf = await fetchText("https://www.cloudflare.com/"), uj = await fetchText("https://data.usajobs.gov/api/codelist/positionscheduletypes");
