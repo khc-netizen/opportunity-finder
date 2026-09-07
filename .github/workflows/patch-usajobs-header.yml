@@ -1,0 +1,36 @@
+name: Fix USAJOBS authentication header
+on:
+  push:
+    branches: [main]
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Correct USAJOBS Authorization header
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('worker/index.js')
+          s = p.read_text()
+          old = 'headers.AuthorizationKey = env.USAJOBS_KEY'
+          new = 'headers["Authorization-Key"] = env.USAJOBS_KEY'
+          if old not in s:
+              print('USAJOBS header already corrected; no change needed.')
+              raise SystemExit(0)
+          s = s.replace(old, new, 1)
+          s = s.replace('const BUILD = "v3.9.6-neo-rls-geographic-validation-final2";', 'const BUILD = "v3.9.6-usajobs-auth-header-fix";', 1)
+          p.write_text(s)
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if git diff --quiet; then
+            echo 'No patch required.'
+          else
+            git add worker/index.js
+            git commit -m 'Fix USAJOBS Authorization-Key header'
+            git push
+          fi
