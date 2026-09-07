@@ -75,6 +75,7 @@ const BUILTIN_EVENT_SOURCES = [
 ];
 const DANCE_RE = /\bdance\b|dancing|ballroom|ballet|tap dance|jazz dance|dance studio|dance academy/i;
 const JUNK_HOST_RE = /(?:facebook|instagram|linkedin|youtube|tiktok|pinterest|x\.com|twitter|wikipedia|yelp|tripadvisor)\./i;
+const FOREIGN_GOV_HOST_RE = /(?:^|\.)(?:gov|gouv|government|gc|ac)\.(?:co|uk|au|nz|ca|in|pk|bd|za|ng|ke|br|mx|fr|de|es|it|nl|be|ch|at|pl|se|no|dk|fi|jp|kr|sg|my|ph|id|th|vn)$/i;
 const ARTICLE_RE = /\b(?:news|newspaper|journalism|press release|obituary|podcast|radio|weather|scoreboard|politics|election|recipe|restaurant review|blog post)\b/i;
 const AMISH_RE = /\bamish\b|\bamish[- ]owned\b|\bamish[- ]run\b/i;
 const CAREER_RE = /(?:career|careers|jobs|employment|work with us|join our team|job openings|opportunities)/i;
@@ -147,6 +148,7 @@ async function searchWeb(query, env, budget) {
     try {
       const x = new URL(href);
       if (JUNK_HOST_RE.test(x.hostname)) return;
+      if (FOREIGN_GOV_HOST_RE.test(x.hostname)) return;
       if (!urls.some(v => urlKey(v) === urlKey(x.href))) urls.push(x.href);
     } catch {}
   };
@@ -675,15 +677,16 @@ function buildUSADiscoveryAnchors(city, state) {
 }
 function buildJobQueries(interests, city, state) { const base = interestBase(interests).slice(0, 6), p = `"${city}" ${state}`; return [...new Set(base.map(x => `"${x}" ${p} (jobs OR careers OR employment OR hiring) -dance`))].slice(0, 6); }
 function buildUSAQueries(interests) {
-  const broad = [
+  // Keep the federal discovery pass broad but bounded. Interest-specific web/job discovery
+  // remains available elsewhere; adding those interests to every USAJOBS anchor multiplied
+  // requests too aggressively and exhausted the shared fetch budget.
+  return [
     "maintenance facilities technician laborer mechanic equipment",
     "trades fabrication welder woodworking technician",
     "transportation warehouse material handling",
     "parks recreation natural resources",
     "cultural resources museum historic preservation archaeology"
   ];
-  const interestQueries = interests.slice(0, 4).map(x => clean(x)).filter(Boolean);
-  return [...new Set([...broad, ...interestQueries])].slice(0, 8);
 }
 function parseNeoRlsJobs(html, baseUrl, interests, city, state, radius = 30, options = {}) {
   const base = new URL(baseUrl), jobs = [];
