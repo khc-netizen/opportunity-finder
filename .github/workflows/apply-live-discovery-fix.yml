@@ -12,13 +12,65 @@ jobs:
       - uses: actions/checkout@v4
       - name: Apply patch
         run: |
-          echo 'ZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCmltcG9ydCByZQpwPVBhdGgoJ3dvcmtlci9pbmRleC5qcycpCnM9cC5yZWFkX3RleHQoKQpvbGQ9J2NvbnN0IExPV19WQUxVRV9IT1NUX1JFID0gLyg/OmJyaXRhbm5pY2FcXC5jb218d29ybGRoaXN0b3J5XFwub3JnfG1lcnJpYW0td2Vic3RlclxcLmNvbXxhbG1hbmFjXFwuY29tfHBldG1kXFwuY29tfGEtei1hbmltYWxzXFwuY29tfG5ld3NicmVha1xcLmNvbXxncm91bmRcXC5uZXdzfHJheW5ldG9kYXlcXC5jb218cmVzdGF1cmFudGppXFwuY29tfHR2dHZcXC51c3x3ZWF0aGVyXFwuY29tfGhpc3RvcnlcXC5jb218cGFjbnljXFwub3JnfGNlbnR1cnljb21tdW5pdGllc1xcLmNvbXxjZW50dXJ5bWFydGlhbGFydHNcXC5jb218Y2VudHVyeWhvdXNlXFwuYml6KSQvaTsnCmlmICd6aWxsb3dcXC5jb20nIG5vdCBpbiBzOgogICAgbmV3PW9sZFs6LTNdKyd8emlsbG93XFwuY29tfHJlYWx0b3JcXC5jb218cmVkZmluXFwuY29tfHRydWxpYVxcLmNvbSkkL2k7JwogICAgaWYgb2xkIG5vdCBpbiBzOiByYWlzZSBTeXN0ZW1FeGl0KCdob3N0IGFuY2hvciBtaXNzaW5nJykKICAgIHM9cy5yZXBsYWNlKG9sZCxuZXcsMSkKaWYgJ0xPV19VkFMVUVfSE9TVF9SRS50ZXN0KHguaG9zdG5hbWUpJyBub3QgaW4gczoKICAgIG9sZD0nICAgICAgaWYgKEpVTktfSE9TVF9SRS50ZXN0KHguaG9zdG5hbWUpKSByZXR1cm47XG4gICAgICBpZiAoRk9SRUlHTl9HT1ZfSE9TVF9SRS50ZXN0KHguaG9zdG5hbWUpKSByZXR1cm47JwogICAgbmV3Mj0nICAgICAgaWYgKEpVTktfSE9TVF9SRS50ZXN0KHguaG9zdG5hbWUpKSByZXR1cm47XG4gICAgICBpZiAoTE9XX1ZBTFVFX0hPU1RfUkUudGVzdCh4Lmhvc3RuYW1lKSB8fCBMT1dfVkFMVUVfUEFUSF9SRS50ZXN0KHgucGF0aG5hbWUpKSByZXR1cm47XG4gICAgICBpZiAoRk9SRUlHTl9HT1ZfSE9TVF9SRS50ZXN0KHguaG9zdG5hbWUpKSByZXR1cm47JwogICAgaWYgb2xkMiBub3QgaW4gczogcmFpc2UgU3lzdGVtRXhpdCgnc2VhcmNoIGZpbHRlciBhbmNob3IgbWlzc2luZycpCiAgICBzPXMucmVwbGFjZShvbGQyLG5ldzIsMSkKcGF0PXJlLmNvbXBpbGUocidmdW5jdGlvbiBidWlsZEpvYlF1ZXJpZXNcKGludGVyZXN0cywgY2l0eSwgc3RhdGVcKSBcey4qP1xuXH0nLHJlLlMpCm5ld2Z1bmM9JycnZnVuY3Rpb24gYnVpbGRKb2JRdWVyaWVzKGludGVyZXN0cywgY2l0eSwgc3RhdGUpIHsKICBjb25zdCBwID0gYCIke2NpdHl9IiAke3N0YXRlfWA7CiAgY29uc3QgYnJvYWQgPSBbCiAgICAibWFpbnRlbmFuY2UgZmFjaWxpdGllcyB0ZWNobmljaWFuIGxhYm9yZXIiLAogICAgIndlbGRpbmcgZmFicmljYXRpb24gbWVjaGFuaWMgZXF1aXBtZW50IiwKICAgICJ3YXJlaG91c2UgbWF0ZXJpYWwgaGFuZGxpbmcgZGVsaXZlcnkgdHJhbnNwb3J0YXRpb24iLAogICAgInBhcmtzIGdyb3VuZHMgcmVjcmVhdGlvbiBuYXR1cmFsIHJlc291cmNlcyIsCiAgICAibXVzZXVtIGhpc3RvcmljIHByZXNlcnZhdGlvbiBsaWJyYXJ5IiwKICAgICJjdXN0b2RpYWwgZmFjaWxpdGllcyBidWlsZGluZyBtYWludGVuYW5jZSIKICBdOwogIGNvbnN0IHNwZWNpZmljID0gaW50ZXJlc3RzLnNsaWNlKDAsIDIpLm1hcCh4ID0+IGNsZWFuKHgpKS5maWx0ZXIoQm9vbGVhbik7CiAgY29uc3QgYmFzZSA9IFsuLi5icm9hZC5zbGljZSgwLCA0KSwgLi4uc3BlY2lmaWMsIC4uLmJyb2FkLnNsaWNlKDQpXTsKICByZXR1cm4gWy4uLm5ldyBTZXQoYmFzZS5tYXAoeCA9PiBgIiR7eH0iICR7cH0gKGpvYnMgT1IgY2FyZWVycyBPUiBlbXBsb3ltZW50IE9SIGhpcmluZykgLWRhbmNlYCkpXS5zbGljZSgwLCA2KTtcbn0nJycKcyxuPXBhdC5zdWJuKG5ld2Z1bmMscyxjb3VudD0xKQppZiBuIT0xOiByYWlzZSBTeXN0ZW1FeGl0KGYnYnVpbGRKb2JRdWVyaWVzIG5vdCBmb3VuZDoge259JykKaWYgJ0pPQl9KVU5LX0hPU1RfUkUnIG5vdCBpbiBzOgogICAgb2xkPSdjb25zdCBMT1dfVkFMVUVfUEFUSF9SRSAnCmlmIG9sZCBub3QgaW4gczoKICAgIG9sZD0nY29uc3QgTE9XX1ZBTFVFX1BBVEhfUkUgPSAnCiAgICBpZiBvbGQgbm90IGluIHM6IHJhaXNlIFN5c3RlbUV4aXQoJ3BhdGggYW5jaG9yIG1pc3NpbmcnKQpvbGQzPSdpZiAoIWFjY2VwdERpc2NvdmVyeVVybCh1LCBzdGF0ZSkgfHwgQ0FSRUVSX1JFLnRlc3QodSkpIGNvbnRpbnVlOycKbmV3Mz0naWYgKCFhY2NlcHREaXNjb3ZlcnlVcmwodSwgc3RhdGUpIHx8IENBUkVFUl9SRS50ZXN0KHUpIHx8IEpPQl9KVU5LX0hPU1RfUkUudGVzdChob3N0KHUpKSAgY29udGludWU7JwppZiBvbGQzIG5vdCBpbiBzOiByYWlzZSBTeXN0ZW1FeGl0KCdkZXRhaWwgZmlsdGVyIGFuY2hvciBtaXNzaW5nJykKcy5yZXBsYWNlKG9sZDIsbmV3MiwxKQpzLnJlcGxhY2Uob2xkMyxuZXczLDEpCnM9cy5yZXBsYWNlKCdkb25vdC1yZWFjaCcsJ2RvbmUtcmVhY2gnLDEpIGlmIEZhbHNlIGVsc2Ugcwo=' | base64 -d >/tmp/patch.py
-          python3 /tmp/patch.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('worker/index.js')
+          s = p.read_text()
+          old = '''function buildJobQueries(interests, city, state) {
+            const p = `"${city}" ${state}`;
+            const broad = ["maintenance facilities technician laborer", "welding fabrication mechanic equipment", "warehouse material handling delivery transportation", "parks grounds recreation natural resources", "museum historic preservation library", "custodial facilities building maintenance"];
+            const specific = interests.slice(0, 4).map(x => clean(x)).filter(Boolean);
+            const base = interests.length ? [...specific, ...broad.slice(0, 6 - specific.length)] : broad;
+            return [...new Set(base.map(x => `"${x}" ${p} (jobs OR careers OR employment OR hiring) -dance`))].slice(0, 6);
+          }'''
+          new = '''function buildJobQueries(interests, city, state) {
+            const p = `"${city}" ${state}`;
+            const broad = [
+              "maintenance facilities technician laborer",
+              "welding fabrication mechanic equipment",
+              "warehouse material handling delivery transportation",
+              "parks grounds recreation natural resources",
+              "museum historic preservation library",
+              "custodial facilities building maintenance"
+            ];
+            const specific = interests.slice(0, 2).map(x => clean(x)).filter(Boolean);
+            const base = [...broad.slice(0, 4), ...specific, ...broad.slice(4)];
+            return [...new Set(base.map(x => `"${x}" ${p} (jobs OR careers OR employment OR hiring) -dance`))].slice(0, 6);
+          }'''
+          if old not in s:
+              raise SystemExit('buildJobQueries block not found')
+          s = s.replace(old, new, 1)
+          old = 'const LOW_VALUE_HOST_RE = /(?:britannica\\.com|worldhistory\\.org|merriam-webster\\.com|almanac\\.com|petmd\\.com|a-z-animals\\.com|newsbreak\\.com|ground\\.news|raynetoday\\.com|restaurantji\\.com|tvtv\\.us|weather\\.com|history\\.com|pacnyc\\.org|centurycommunities\\.com|centurymartialarts\\.com|centuryhouse\\.biz)$/i;'
+          new = 'const LOW_VALUE_HOST_RE = /(?:britannica\\.com|worldhistory\\.org|merriam-webster\\.com|almanac\\.com|petmd\\.com|a-z-animals\\.com|newsbreak\\.com|ground\\.news|raynetoday\\.com|restaurantji\\.com|tvtv\\.us|weather\\.com|history\\.com|pacnyc\\.org|centurycommunities\\.com|centurymartialarts\\.com|centuryhouse\\.biz|zillow\\.com|realtor\\.com|redfin\\.com|trulia\\.com)$/i;'
+          if 'zillow\\.com' not in s:
+              if old not in s: raise SystemExit('low-value host block not found')
+              s = s.replace(old, new, 1)
+          old = '      if (JUNK_HOST_RE.test(x.hostname)) return;\n      if (FOREIGN_GOV_HOST_RE.test(x.hostname)) return;'
+          new = '      if (JUNK_HOST_RE.test(x.hostname)) return;\n      if (LOW_VALUE_HOST_RE.test(x.hostname) || LOW_VALUE_PATH_RE.test(x.pathname)) return;\n      if (FOREIGN_GOV_HOST_RE.test(x.hostname)) return;'
+          if 'LOW_VALUE_HOST_RE.test(x.hostname)' not in s:
+              if old not in s: raise SystemExit('searchWeb filter block not found')
+              s = s.replace(old, new, 1)
+          old = 'const LOW_VALUE_PATH_RE = /\\/(?:dictionary|article|articles|news|weather|recipes?|podcasts?|restaurant-reviews?)\\b/i;'
+          new = old + '\nconst JOB_JUNK_HOST_RE = /(?:zillow\\.com|realtor\\.com|redfin\\.com|trulia\\.com|pinterest\\.com|wikipedia\\.org|newsbreak\\.com|merriam-webster\\.com)$/i;'
+          if 'JOB_JUNK_HOST_RE' not in s:
+              if old not in s: raise SystemExit('low-value path block not found')
+              s = s.replace(old, new, 1)
+          old = '      if (!acceptDiscoveryUrl(u, state) || CAREER_RE.test(u)) continue;'
+          new = '      if (!acceptDiscoveryUrl(u, state) || CAREER_RE.test(u) || JOB_JUNK_HOST_RE.test(host(u))) continue;'
+          if old not in s: raise SystemExit('job filter block not found')
+          s = s.replace(old, new, 1)
+          old = 'const BUILD = "v3.9.9-discovery-efficiency";'
+          new = 'const BUILD = "v3.9.10-live-discovery-path";'
+          if old not in s: raise SystemExit('build marker not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
       - name: Validate
         run: |
           git diff --check
           node --check worker/index.js
           grep -q 'v3.9.10-live-discovery-path' worker/index.js
+          grep -q 'JOB_JUNK_HOST_RE' worker/index.js
       - name: Commit fix
         run: |
           git config user.name "github-actions[bot]"
