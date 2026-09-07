@@ -50,8 +50,8 @@ export default {
   }
 };
 
-const VERSION = "3.8.1";
-const BUILD = "v3.8.1-strict-local-validation";
+const VERSION = "3.9.0";
+const BUILD = "v3.9.0-clean-local-validation";
 const SEARCH_LIMIT = 10;
 const PAGE_LIMIT = 72;
 const DANCE_RE = /\bdance\b|dancing|ballroom|ballet|tap dance|jazz dance|dance studio|dance academy/i;
@@ -61,7 +61,7 @@ const CAREER_RE = /(?:career|careers|jobs|employment|work with us|join our team|
 const ORG_RE = /(?:association|society|club|guild|chapter|council|league|organization|organisation|foundation|historical society|heritage|museum|library|conservancy|preservation|collective|fellowship|alliance|coalition|volunteer group|chapter)/i;
 const VENUE_RE = /(?:museum|library|historic site|historical site|heritage center|heritage centre|park|nature center|nature centre|arboretum|botanical garden|fairgrounds|community center|community centre|cultural center|cultural centre|observatory|visitor center|visitor centre|hall|farm|homestead|mill|theater|theatre)/i;
 const EVENT_RE = /(?:event|calendar|meeting|workshop|program|programme|exhibit|exhibition|festival|fair|lecture|tour|open house|class|demo|demonstration|registration|tickets|admission|rsvp)/i;
-const LOCAL_REGION_RE = /\b(?:ohio|trumbull|warren|northeast ohio|geauga|portage|ashtabula|mahoning|columbiana|summit|lake|cuyahoga)\b/i;
+const LOCAL_REGION_RE = /\b(?:ohio|oh|trumbull|warren|mesopotamia|northeast ohio|geauga|portage|ashtabula|mahoning|columbiana|summit|lake|cuyahoga|pennsylvania|pa)\b/i;
 
 function splitParam(s) { return String(s || "").split(",").map(x => x.trim()).filter(Boolean); }
 function errorMessage(e) { return e instanceof Error ? (e.message || String(e)) : typeof e === "string" ? e : (() => { try { return JSON.stringify(e); } catch { return String(e); } })(); }
@@ -143,7 +143,7 @@ function buildOrgQueries(interests, city, state) {
   const places = targetPlaces(city, state), cats = interestBase(interests), qs = [];
   for (let i = 0; i < Math.min(10, cats.length); i++) {
     const p = places[i % places.length];
-    qs.push(`"${cats[i]}" ${p} Ohio (association OR society OR club OR guild OR chapter OR organization) -dance`);
+    qs.push(`"${cats[i]}" ${p} (association OR society OR club OR guild OR chapter OR organization) -dance`);
     if (i < 5) qs.push(`${p} ("historical society" OR museum OR "nature center" OR beekeepers OR blacksmith OR reenactment OR "craft guild") -dance`);
   }
   return [...new Set(qs)].slice(0, SEARCH_LIMIT);
@@ -275,7 +275,7 @@ function parseOrganizationPage(html, baseUrl, interests, city, state, venueMode 
   if (ORG_RE.test(`${title} ${desc} ${text.slice(0, 8000)}`)) evidence.push("organization-language");
   if (VENUE_RE.test(`${title} ${desc}`)) evidence.push("venue-language");
   if (LOCAL_REGION_RE.test(text.slice(0, 10000))) evidence.push("regional-language");
-  if (new RegExp(`\b${escapeRe(city)}\b`, "i").test(text)) evidence.push("city-name");
+  if (new RegExp(`\\b${escapeRe(city)}\\b`, "i").test(text)) evidence.push("city-name");
   if (DANCE_RE.test(`${title} ${desc}`)) return { organizations: [], evidence, rejectReason: "dance exclusion" };
   if (ARTICLE_RE.test(title) && !ORG_RE.test(`${title} ${desc}`)) return { organizations: [], evidence, rejectReason: "article/publisher page" };
 
@@ -288,7 +288,7 @@ function parseOrganizationPage(html, baseUrl, interests, city, state, venueMode 
   const combined = `${title} ${desc} ${structuredText} ${text.slice(0, 12000)}`;
   const orgEvidence = ORG_RE.test(combined), venueEvidence = VENUE_RE.test(combined);
   const localEvidence = geographicEvidence(combined, city, state);
-  if (hardOutOfArea(combined, city, state) && !new RegExp(`\b${escapeRe(city)}\b`, "i").test(combined)) return { organizations: [], evidence, rejectReason: "page contains a contradictory out-of-area location" };
+  if (hardOutOfArea(combined, city, state) && !new RegExp(`\\b${escapeRe(city)}\\b`, "i").test(combined)) return { organizations: [], evidence, rejectReason: "page contains a contradictory out-of-area location" };
   if ((!orgEvidence && !venueEvidence) || localEvidence.score < 45) {
     return { organizations: [], evidence, rejectReason: !orgEvidence && !venueEvidence ? "insufficient organization/venue evidence" : "insufficient geographic evidence" };
   }
@@ -298,7 +298,7 @@ function parseOrganizationPage(html, baseUrl, interests, city, state, venueMode 
   return { organizations: [{
     id: key(name, base.href), name, url: base.href, description: desc.slice(0, 900),
     type: classifyOrg(`${name} ${desc}`), confidence: Math.min(100, 55 + (orgEvidence ? 18 : 10) + (venueEvidence ? 12 : 0) + localEvidence.score / 4 + Math.min(score, 15)),
-    score: score + localEvidence.score, location: extractLocation(text, city, state), source: "validated public page", discoveryQuality: "verified", locationScore: localEvidence.score
+    score: score + localEvidence.score, location: structuredLocations[0] || extractLocation(text, city, state), source: "validated public page", discoveryQuality: "verified", locationScore: localEvidence.score
   }], evidence, rejectReason: null };
 }
 function extractOrganizationStructuredData(html) {
@@ -316,7 +316,7 @@ function extractOrganizationStructuredData(html) {
 function hardOutOfArea(text, city, state) {
   if (!/^(OH|Ohio)$/i.test(state)) return false;
   const t = norm(text);
-  const hasOhio = /\b(?:ohio|trumbull|warren|northeast ohio|geauga|portage|ashtabula|mahoning|columbiana|summit|lake|cuyahoga)\b/.test(t);
+  const hasOhio = /\bohio\b/.test(t) || /\boh\b/.test(t);
   const hasOutside = /\b(?:new jersey|new york|pennsylvania|michigan|indiana|kentucky|west virginia)\b/.test(t);
   return hasOutside && !hasOhio;
 }
@@ -345,22 +345,23 @@ function geographicEvidence(text, city, state) {
   const t = norm(text);
   if (/^(OH|Ohio)$/i.test(state)) {
     const hasOhio = /\bohio\b/.test(t);
-    const hasCity = city ? new RegExp(`\b${escapeRe(norm(city))}\b`, "i").test(t) : false;
+    const hasOhioAbbr = /\boh\b/.test(t);
+    const hasCity = city ? new RegExp(`\\b${escapeRe(norm(city))}\\b`, "i").test(t) : false;
     const hasCountyOrRegion = /\b(?:trumbull county|trumbull|warren|northeast ohio|geauga county|geauga|portage county|portage|ashtabula county|ashtabula|mahoning county|mahoning|columbiana county|columbiana|summit county|summit|lake county|lake|cuyahoga county|cuyahoga)\b/.test(t);
     let score = 0;
-    // The city name alone is deliberately NOT local evidence because "Mesopotamia" is also an ancient region.
-    if (hasOhio) score += 45;
-    if (hasCity && hasOhio) score += 35;
-    if (hasCountyOrRegion && hasOhio) score += 20;
-    return { score: Math.min(100, score), hasOhio, hasCity, hasCountyOrRegion };
+    // City name alone is deliberately NOT local evidence because Mesopotamia is also an ancient region.
+    if (hasOhio || hasOhioAbbr) score += 45;
+    if (hasCity && (hasOhio || hasOhioAbbr)) score += 35;
+    if (hasCountyOrRegion && (hasOhio || hasOhioAbbr)) score += 20;
+    return { score: Math.min(100, score), hasOhio, hasOhioAbbr, hasCity, hasCountyOrRegion };
   }
   const wantedState = norm(state);
-  const hasState = wantedState && new RegExp(`\b${escapeRe(wantedState)}\b`, "i").test(t);
-  const hasCity = city ? new RegExp(`\b${escapeRe(norm(city))}\b`, "i").test(t) : false;
+  const hasState = wantedState && new RegExp(`\\b${escapeRe(wantedState)}\\b`, "i").test(t);
+  const hasCity = city ? new RegExp(`\\b${escapeRe(norm(city))}\\b`, "i").test(t) : false;
   return { score: (hasState ? 50 : 0) + (hasCity && hasState ? 50 : 0), hasState, hasCity };
 }
 function extractLocation(text, city, state) {
-  const m = text.match(new RegExp(`.{0,80}\b${escapeRe(city)}\b.{0,80}`, "i"));
+  const m = text.match(new RegExp(`.{0,80}\\b${escapeRe(city)}\\b.{0,80}`, "i"));
   return clean(m ? m[0] : `${city}, ${state}`);
 }
 function escapeRe(s) { return String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
@@ -398,7 +399,7 @@ function parseEvents(html, baseUrl, interests, city, state, org) {
   return { events: dedupeBy(events, x => key(x.title, x.url + x.date)), evidence, rejectReason: null };
 }
 function flattenJsonLd(x) { if (Array.isArray(x)) return x.flatMap(flattenJsonLd); if (x && typeof x === "object") return [x, ...(Array.isArray(x["@graph"]) ? x["@graph"].flatMap(flattenJsonLd) : [])]; return []; }
-function formatLocation(x) { if (!x) return ""; if (typeof x === "string") return clean(x); if (Array.isArray(x)) return x.map(formatLocation).filter(Boolean).join("; "); return [x.name, x.streetAddress, x.addressLocality, x.addressRegion, x.postalCode].filter(Boolean).map(clean).join(", "); }
+function formatLocation(x) { if (!x) return ""; if (typeof x === "string") return clean(x); if (Array.isArray(x)) return x.map(formatLocation).filter(Boolean).join("; "); if (x.address) return [x.name, formatLocation(x.address)].filter(Boolean).join(", "); return [x.name, x.streetAddress, x.addressLocality, x.addressRegion, x.postalCode].filter(Boolean).map(clean).join(", "); }
 function findDate(t) { const m = String(t).match(/\b(?:20\d{2}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[/-]\d{1,2}[/-]20\d{2}|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:,\s*20\d{2})?)\b/i); return m ? m[0] : ""; }
 function relevanceScore(text, interests) { const t = norm(text); let s = 0; for (const i of interests) { const q = norm(i); if (!q) continue; if (t.includes(q)) s += 10; for (const w of q.split(" ").filter(x => x.length > 3)) if (t.includes(w)) s += 2; } return s; }
 
