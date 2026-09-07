@@ -37,8 +37,7 @@ jobs:
             const base = [...broad.slice(0, 4), ...specific, ...broad.slice(4)];
             return [...new Set(base.map(x => `"${x}" ${p} (jobs OR careers OR employment OR hiring) -dance`))].slice(0, 6);
           }'''
-          if old not in s:
-              raise SystemExit('buildJobQueries block not found')
+          if old not in s: raise SystemExit('buildJobQueries block not found')
           s = s.replace(old, new, 1)
           old = 'const LOW_VALUE_HOST_RE = /(?:britannica\\.com|worldhistory\\.org|merriam-webster\\.com|almanac\\.com|petmd\\.com|a-z-animals\\.com|newsbreak\\.com|ground\\.news|raynetoday\\.com|restaurantji\\.com|tvtv\\.us|weather\\.com|history\\.com|pacnyc\\.org|centurycommunities\\.com|centurymartialarts\\.com|centuryhouse\\.biz)$/i;'
           new = 'const LOW_VALUE_HOST_RE = /(?:britannica\\.com|worldhistory\\.org|merriam-webster\\.com|almanac\\.com|petmd\\.com|a-z-animals\\.com|newsbreak\\.com|ground\\.news|raynetoday\\.com|restaurantji\\.com|tvtv\\.us|weather\\.com|history\\.com|pacnyc\\.org|centurycommunities\\.com|centurymartialarts\\.com|centuryhouse\\.biz|zillow\\.com|realtor\\.com|redfin\\.com|trulia\\.com)$/i;'
@@ -77,4 +76,4 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add worker/index.js
           git commit -m "Apply live discovery fix"
-          git push origin HEAD
+          git push --force-with-lease origin HEAD
