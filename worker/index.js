@@ -74,13 +74,14 @@ const BUILTIN_EVENT_SOURCES = [
   { url: "https://centuryvillagemuseum.org/events-calendar/", name: "Century Village Museum" }
 ];
 const DANCE_RE = /\bdance\b|dancing|ballroom|ballet|tap dance|jazz dance|dance studio|dance academy/i;
+const ORG_DANCE_RE = /(?:dance studio|dance academy|dance school|dance company|dance troupe|ballroom studio|ballet school|ballet academy|tap dance studio|jazz dance studio|dance club)/i;
 const JUNK_HOST_RE = /(?:facebook|instagram|linkedin|youtube|tiktok|pinterest|x\.com|twitter|wikipedia|yelp|tripadvisor|google|googleusercontent|googleapis|classroom|drive|accounts|menards|usps|17track|fedex)\./i;
 const FOREIGN_GOV_HOST_RE = /(?:^|\.)(?:gov|gouv|government|gc|ac)\.(?:co|uk|au|nz|ca|in|pk|bd|za|ng|ke|br|mx|fr|de|es|it|nl|be|ch|at|pl|se|no|dk|fi|jp|kr|sg|my|ph|id|th|vn)$/i;
 const ARTICLE_RE = /\b(?:news|newspaper|journalism|press release|obituary|podcast|radio|weather|scoreboard|politics|election|recipe|restaurant review|blog post)\b/i;
 const AMISH_RE = /\bamish\b|\bamish[- ]owned\b|\bamish[- ]run\b/i;
 const CAREER_RE = /(?:career|careers|jobs|employment|work with us|join our team|job openings|opportunities)/i;
-const ORG_RE = /(?:association|society|club|guild|chapter|council|league|organization|organisation|foundation|historical society|heritage|museum|library|conservancy|preservation|collective|fellowship|alliance|coalition|volunteer group|chapter)/i;
-const ORG_IDENTITY_RE = /(?:association|society|club|guild|chapter|council|league|organization|organisation|foundation|conservancy|preservation|collective|fellowship|alliance|coalition|volunteer group)/i;
+const ORG_RE = /(?:association|society|club|guild|chapter|council|league|organization|organisation|foundation|historical society|heritage|museum|library|conservancy|preservation|collective|fellowship|alliance|coalition|volunteer group|shire|barony|SCA|living history)/i;
+const ORG_IDENTITY_RE = /(?:association|society|club|guild|chapter|council|league|organization|organisation|foundation|conservancy|preservation|collective|fellowship|alliance|coalition|volunteer group|shire|barony|SCA|living history)/i;
 const VENUE_RE = /(?:museum|library|historic site|historical site|heritage center|heritage centre|park|nature center|nature centre|arboretum|botanical garden|fairgrounds|community center|community centre|cultural center|cultural centre|observatory|visitor center|visitor centre|hall|farm|homestead|mill|theater|theatre)/i;
 const EVENT_RE = /(?:event|calendar|meeting|workshop|program|programme|exhibit|exhibition|festival|fair|lecture|tour|open house|class|demo|demonstration|registration|tickets|admission|rsvp)/i;
 const LOCAL_REGION_RE = /\b(?:ohio|trumbull|warren|northeast ohio|geauga|portage|ashtabula|mahoning|columbiana|summit|lake|cuyahoga)\b/i;
@@ -180,14 +181,14 @@ function localSearchSuffix(state) {
   return /^(OH|Ohio)$/i.test(state) ? ` -dance -"ancient Mesopotamia" -"Mesopotamia historical region" -Louisiana -"Church Point"` : "";
 }
 function interestBase(interests) {
-  return interests.length ? interests.slice(0, 8) : ["local history", "museums", "historical societies", "beekeeping", "blacksmithing", "reenactment", "traditional crafts", "nature", "native plants", "woodworking", "astronomy", "cycling", "clubs", "guilds"];
+  return interests.length ? interests.slice(0, 8) : ["local history", "museums", "historical societies", "beekeeping", "blacksmithing", "reenactment", "living history", "SCA", "medieval reenactment", "traditional crafts", "nature", "native plants", "woodworking", "astronomy", "cycling", "clubs", "guilds", "sportsmen"];
 }
 function buildOrgQueries(interests, city, state) {
   const places = targetPlaces(city, state), cats = interestBase(interests), qs = [];
   for (let i = 0; i < Math.min(10, cats.length); i++) {
     const p = places[i % places.length];
     const suffix = localSearchSuffix(state);
-    qs.push(`"${cats[i]}" ${p} Ohio (association OR society OR club OR guild OR chapter OR organization)${suffix}`);
+    qs.push(`"${cats[i]}" ${p} (association OR society OR club OR guild OR chapter OR organization)${suffix}`);
     if (i < 5) qs.push(`${p} ("historical society" OR museum OR "nature center" OR beekeepers OR blacksmith OR reenactment OR "craft guild")${suffix}`);
   }
   return [...new Set(qs)].slice(0, SEARCH_LIMIT);
@@ -364,7 +365,7 @@ function parseOrganizationPage(html, baseUrl, interests, city, state, venueMode 
   if (VENUE_RE.test(identityText)) evidence.push("venue-language");
   if (LOCAL_REGION_RE.test(text.slice(0, 10000))) evidence.push("regional-language");
   if (new RegExp(`\b${escapeRe(city)}\b`, "i").test(text)) evidence.push("city-name");
-  if (DANCE_RE.test(`${title} ${desc}`)) return { organizations: [], evidence, rejectReason: "dance exclusion" };
+  if (ORG_DANCE_RE.test(`${title} ${desc}`)) return { organizations: [], evidence, rejectReason: "dance exclusion" };
   if (ARTICLE_RE.test(title) && !ORG_RE.test(`${title} ${desc}`)) return { organizations: [], evidence, rejectReason: "article/publisher page" };
 
   const structured = extractOrganizationStructuredData(html);
