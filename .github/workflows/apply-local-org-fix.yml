@@ -2,6 +2,8 @@ name: Apply local organization fix
 on:
   push:
     branches: [fix/org-dance-and-local-noise]
+permissions:
+  contents: write
 jobs:
   patch:
     runs-on: ubuntu-latest
