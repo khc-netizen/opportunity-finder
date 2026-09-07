@@ -1,0 +1,27 @@
+name: Debug NEO-RLS parser
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/debug-neo-rls.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run parser against live NEO-RLS
+        run: |
+          node --input-type=module <<'JS'
+          import { parseNeoRlsJobs } from './worker/index.js';
+          const r = await fetch('https://www.neo-rls.org/view_job_postings.php');
+          const html = await r.text();
+          console.log('HTTP', r.status, 'HTML bytes', html.length);
+          const jobs = parseNeoRlsJobs(html, 'https://www.neo-rls.org/view_job_postings.php', ['museum','artifact conservation','historic preservation','archaeology','bike mechanic','welding','fabrication','woodworking','artisan','crafts'], 'Mesopotamia', 'OH', 30, {source:'NEO-RLS',partTime:true});
+          console.log('PARSED JOB COUNT', jobs.length);
+          for (const j of jobs) console.log(JSON.stringify(j));
+          JS
