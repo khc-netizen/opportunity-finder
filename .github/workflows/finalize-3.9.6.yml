@@ -17,7 +17,7 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-      - name: Apply final geographic fixes
+      - name: Repair dynamic geographic regexes
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -31,16 +31,6 @@ jobs:
           ]
           for old, new in replacements:
               s = s.replace(old, new)
-          start = s.index('function parseNeoRlsJobs(')
-          end = s.index('function parseJobs(', start)
-          section = s[start:end]
-          old = 'if (geo.score < 45 || (distance != null && distance > radius)) continue;'
-          new = 'if ((geo.score < 45 && distance == null) || (distance != null && distance > radius)) continue;'
-          if old not in section:
-              raise SystemExit('NEO-RLS geographic condition not found')
-          section = section.replace(old, new, 1)
-          s = s[:start] + section + s[end:]
-          s = s.replace('const VERSION = "3.9.6";', 'const VERSION = "3.9.6";', 1)
           s = s.replace('const BUILD = "v3.9.6-neo-rls-geographic-validation";', 'const BUILD = "v3.9.6-neo-rls-geographic-validation-final";', 1)
           p.write_text(s)
           PY
