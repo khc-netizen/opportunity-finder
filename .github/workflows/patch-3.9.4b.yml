@@ -1,0 +1,57 @@
+name: Phase 3.9.4b targeted parser fixes
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/patch-3.9.4b.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Apply targeted parser fixes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('worker/index.js')
+          s = p.read_text()
+          s = s.replace('const VERSION = "3.9.3";', 'const VERSION = "3.9.4";', 1)
+          s = s.replace('const BUILD = "v3.9.3-local-job-and-event-parser";', 'const BUILD = "v3.9.4-targeted-job-event-repair";', 1)
+          s = s.replace('const geo = geographicEvidence(block + " " + text.slice(0, 5000), city, state);', 'const geo = geographicEvidence(block, city, state);', 1)
+          s = s.replace('const date = findDate(block);\n    if (!date || !EVENT_RE.test(block)', 'const date = findDate(block);\n    if (/\\b(?:bc|bce)\\b/i.test(block) || /\\b(?:solar eclipse|antipope|earl godwine|king edward|battle of arsuf)\\b/i.test(block)) continue;\n    if (!date || !EVENT_RE.test(block)', 1)
+          old = 'return { events: dedupeBy(events, x => key(x.title, x.url + x.date)), evidence, rejectReason: null };'
+          new = '''return { events: dedupeEvents(events), evidence, rejectReason: null };\n}\nfunction dedupeEvents(items) {\n  const seen = new Map();\n  for (const item of items) {\n    const k = `${eventTitleKey(item.title)}|${norm(item.date || "")}|${norm(item.location || "")}`;\n    const old = seen.get(k);\n    if (!old || (item.source === "JSON-LD Event" && old.source !== "JSON-LD Event")) seen.set(k, item);\n  }\n  return [...seen.values()];\n}\nfunction eventTitleKey(title) {\n  return norm(title).replace(/^(?:sun|mon|tue|wed|thu|fri|sat)\\s+\\d{1,2}\\s+/i, "").replace(/\\bfeatured\\b/g, "").replace(/\\b20\\d{2}\\b/g, "").replace(/\\b(?:century village museum|auburn church)\\b/g, "").replace(/\\s+/g, " ").trim();'''
+          if old not in s: raise SystemExit('event dedupe target not found')
+          s = s.replace(old, new, 1)
+          marker = '  return dedupeBy(jobs, x => key(x.title, x.url));\n}'
+          fallback = '''  // Fallback for job boards that render listing titles as anchors instead of headings.\n  for (const m of html.matchAll(/<a[^>]+href=["']([^"']+)["'][^>]*>\\s*([^<]{5,180})\\s*<\\/a>([\\s\\S]{0,7000}?)(?:Read More|(?=<a[^>]+href=["']))/gi)) {\n    const title = clean(m[2]), block = clean(m[3]);\n    if (!looksLikeJobTitle(title) || !block) continue;\n    const combined = `${title} ${block}`;\n    if (DANCE_RE.test(combined) || AMISH_RE.test(combined)) continue;\n    if (options.partTime && !/(part[- ]?time|\\b\\d{1,2}\\s*(?:-|to)\\s*\\d{1,2}\\s*hours?\\b|20\\s*hours?|32\\s*hours?|hourly)/i.test(combined)) continue;\n    const geo = geographicEvidence(combined, city, state), distance = estimateDistance(`${city}, ${state}`, combined), localByCity = !!cityKey(combined);\n    if ((geo.score < 45 && !(trusted && localByCity)) || (distance != null && distance > radius)) continue;\n    const date = findDate(combined), url = abs(m[1], base);\n    jobs.push({ id: key(title, url + "#" + date), title, organization: extractJobOrganization(combined), url, description: block.slice(0, 1100), date, closeDate: findCloseDate(combined), location: extractJobLocation(combined, city, state), employmentType: /part[- ]?time/i.test(combined) ? "Part-time" : /full[- ]?time/i.test(combined) ? "Full-time" : "", source: options.source || "validated job block", score: relevanceScore(combined, interests) + geo.score, type: "job", discoveryQuality: "verified", locationScore: geo.score, distanceMiles: distance });\n  }\n  return dedupeBy(jobs, x => key(x.title, x.url));\n}'''
+          if marker not in s: raise SystemExit('job fallback marker not found')
+          s = s.replace(marker, fallback, 1)
+          p.write_text(s)
+          PY
+      - name: Validate worker
+        run: |
+          node --check worker/index.js
+          node --input-type=module <<'NODE'
+          import { parseEvents, parseJobs } from './worker/index.js';
+          const ev = parseEvents('<h3>Apple Butter Festival 2026</h3><p>October 10 2026. Burton, OH. Festival and historic tours.</p><h3>1251 BC Solar eclipse</h3><p>Conference in Greece.</p>', 'https://centuryvillagemuseum.org/events-calendar/', ['history'], 'Mesopotamia', 'OH', {name:'Century Village Museum',url:'https://centuryvillagemuseum.org/'}, 75);
+          if (ev.events.length !== 1) throw new Error('event smoke test failed');
+          const jobs = parseJobs('<h2>Delivery Driver (Part Time) - Warren-Trumbull County Public Library</h2><p>Part-time, 20 hours/week. Warren, OH.</p><h2>Dance Instructor</h2><p>Part-time dance position in Warren, OH.</p>', 'https://www.neo-rls.org/view_job_postings.php', ['museum'], 'Mesopotamia', 'OH', 30, {source:'NEO-RLS',partTime:true});
+          if (jobs.length !== 1) throw new Error('job smoke test failed');
+          console.log('3.9.4b parser tests passed');
+          NODE
+      - name: Commit worker repair
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add worker/index.js
+          git commit -m "Phase 3.9.4 repair local job and event parsing" || exit 0
+          git push origin main
