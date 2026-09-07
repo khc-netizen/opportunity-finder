@@ -56,7 +56,7 @@ export default {
 };
 
 const VERSION = "3.9.8";
-const BUILD = "v3.9.9-discovery-efficiency";
+const BUILD = "v3.9.11-search-filter";
 const SEARCH_LIMIT = 10;
 const ORG_DISCOVERY_QUERY_LIMIT = 14;
 const ORG_VALIDATION_LIMIT = 18;
@@ -85,8 +85,9 @@ const BUILTIN_EVENT_SOURCES = [
 const DANCE_RE = /\bdance\b|dancing|ballroom|ballet|tap dance|jazz dance|dance studio|dance academy/i;
 const ORG_DANCE_RE = /(?:dance studio|dance academy|dance school|dance company|dance troupe|ballroom studio|ballet school|ballet academy|tap dance studio|jazz dance studio|dance club)/i;
 const JUNK_HOST_RE = /(?:facebook|instagram|linkedin|youtube|tiktok|pinterest|x\.com|twitter|wikipedia|yelp|tripadvisor|google|googleusercontent|googleapis|classroom|drive|accounts|menards|usps|17track|fedex)\./i;
-const LOW_VALUE_HOST_RE = /(?:britannica\.com|worldhistory\.org|merriam-webster\.com|almanac\.com|petmd\.com|a-z-animals\.com|newsbreak\.com|ground\.news|raynetoday\.com|restaurantji\.com|tvtv\.us|weather\.com|history\.com|pacnyc\.org|centurycommunities\.com|centurymartialarts\.com|centuryhouse\.biz)$/i;
+const LOW_VALUE_HOST_RE = /(?:britannica\.com|worldhistory\.org|merriam-webster\.com|almanac\.com|petmd\.com|a-z-animals\.com|newsbreak\.com|ground\.news|raynetoday\.com|restaurantji\.com|tvtv\.us|weather\.com|history\.com|pacnyc\.org|centurycommunities\.com|centurymartialarts\.com|centuryhouse\.biz|zillow\.com|realtor\.com|redfin\.com|trulia\.com)$/i;
 const LOW_VALUE_PATH_RE = /\/(?:dictionary|article|articles|news|weather|recipes?|podcasts?|restaurant-reviews?)\b/i;
+const JOB_JUNK_HOST_RE = /(?:zillow\.com|realtor\.com|redfin\.com|trulia\.com|pinterest\.com|wikipedia\.org|newsbreak\.com|merriam-webster\.com)$/i;
 const FOREIGN_GOV_HOST_RE = /(?:^|\.)(?:gov|gouv|government|gc|ac)\.(?:co|uk|au|nz|ca|in|pk|bd|za|ng|ke|br|mx|fr|de|es|it|nl|be|ch|at|pl|se|no|dk|fi|jp|kr|sg|my|ph|id|th|vn)$/i;
 const ARTICLE_RE = /\b(?:news|newspaper|journalism|press release|obituary|podcast|radio|weather|scoreboard|politics|election|recipe|restaurant review|blog post)\b/i;
 const AMISH_RE = /\bamish\b|\bamish[- ]owned\b|\bamish[- ]run\b/i;
@@ -160,6 +161,7 @@ async function searchWeb(query, env, budget) {
     try {
       const x = new URL(href);
       if (JUNK_HOST_RE.test(x.hostname)) return;
+      if (LOW_VALUE_HOST_RE.test(x.hostname) || LOW_VALUE_PATH_RE.test(x.pathname)) return;
       if (FOREIGN_GOV_HOST_RE.test(x.hostname)) return;
       if (!urls.some(v => urlKey(v) === urlKey(x.href))) urls.push(x.href);
     } catch {}
@@ -685,7 +687,7 @@ async function discoverJobs(interests, city, state, radius, partTime, env) {
     diagnostics.push({ stage: "job-search", query, ok: r.ok, status: r.status, parser: r.parser || null, candidates: r.urls.length, milliseconds: r.milliseconds, bytes: r.bytes, error: r.ok ? null : r.error });
     for (const u of r.urls.slice(0, JOB_WEB_VALIDATION_LIMIT)) {
       if (budget.used >= budget.limit) break;
-      if (!acceptDiscoveryUrl(u, state) || CAREER_RE.test(u)) continue;
+      if (!acceptDiscoveryUrl(u, state) || CAREER_RE.test(u) || JOB_JUNK_HOST_RE.test(host(u))) continue;
       const pr = await fetchText(u, {}, budget);
       const d = { stage: "job-validation", url: u, ok: pr.ok, status: pr.status, accepted: 0, rejected: null };
       if (!pr.ok) { d.rejected = pr.error || `HTTP ${pr.status}`; diagnostics.push(d); continue; }
@@ -715,9 +717,16 @@ function buildUSADiscoveryAnchors(city, state) {
 }
 function buildJobQueries(interests, city, state) {
   const p = `"${city}" ${state}`;
-  const broad = ["maintenance facilities technician laborer", "welding fabrication mechanic equipment", "warehouse material handling delivery transportation", "parks grounds recreation natural resources", "museum historic preservation library", "custodial facilities building maintenance"];
-  const specific = interests.slice(0, 4).map(x => clean(x)).filter(Boolean);
-  const base = interests.length ? [...specific, ...broad.slice(0, 6 - specific.length)] : broad;
+  const broad = [
+    "maintenance facilities technician laborer",
+    "welding fabrication mechanic equipment",
+    "warehouse material handling delivery transportation",
+    "parks grounds recreation natural resources",
+    "museum historic preservation library",
+    "custodial facilities building maintenance"
+  ];
+  const specific = interests.slice(0, 2).map(x => clean(x)).filter(Boolean);
+  const base = [...broad.slice(0, 4), ...specific, ...broad.slice(4)];
   return [...new Set(base.map(x => `"${x}" ${p} (jobs OR careers OR employment OR hiring) -dance`))].slice(0, 6);
 }
 function buildUSAQueries(interests) {
