@@ -20,8 +20,8 @@ jobs:
           from pathlib import Path
           p=Path('worker/index.js')
           s=p.read_text()
-          s=s.replace('const VERSION = "3.9.1";','const VERSION = "3.9.3";',1)
-          s=s.replace('const BUILD = "v3.9.1-jobs-source-priority";','const BUILD = "v3.9.3-local-job-and-event-parser";',1)
+          s=s.replace('const VERSION = "3.9.2";','const VERSION = "3.9.3";',1)
+          s=s.replace('const BUILD = "v3.9.2-trusted-event-sources";','const BUILD = "v3.9.3-local-job-and-event-parser";',1)
           if 'const AMISH_RE =' not in s:
               s=s.replace('const CAREER_RE =','const AMISH_RE = /\\bamish\\b|\\bamish[- ]owned\\b|\\bamish[- ]run\\b/i;\nconst CAREER_RE =',1)
           start=s.index('function parseEvents('); end=s.index('\nasync function diagnostics(',start); mid=s[start:end]
