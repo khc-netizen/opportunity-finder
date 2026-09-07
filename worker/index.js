@@ -50,10 +50,11 @@ export default {
   }
 };
 
-const VERSION = "3.8.0";
-const BUILD = "v3.8.0-organization-first";
+const VERSION = "3.8.1";
+const BUILD = "v3.8.1-strict-local-validation";
 const SEARCH_LIMIT = 10;
 const PAGE_LIMIT = 24;
+const DISCOVERY_BUDGET_DEFAULT = 72;
 const DANCE_RE = /\bdance\b|dancing|ballroom|ballet|tap dance|jazz dance|dance studio|dance academy/i;
 const JUNK_HOST_RE = /(?:facebook|instagram|linkedin|youtube|tiktok|pinterest|x\.com|twitter|wikipedia|yelp|tripadvisor)\./i;
 const ARTICLE_RE = /\b(?:news|newspaper|journalism|press release|obituary|podcast|radio|weather|scoreboard|politics|election|recipe|restaurant review|blog post)\b/i;
@@ -61,7 +62,7 @@ const CAREER_RE = /(?:career|careers|jobs|employment|work with us|join our team|
 const ORG_RE = /(?:association|society|club|guild|chapter|council|league|organization|organisation|foundation|historical society|heritage|museum|library|conservancy|preservation|collective|fellowship|alliance|coalition|volunteer group|chapter)/i;
 const VENUE_RE = /(?:museum|library|historic site|historical site|heritage center|heritage centre|park|nature center|nature centre|arboretum|botanical garden|fairgrounds|community center|community centre|cultural center|cultural centre|observatory|visitor center|visitor centre|hall|farm|homestead|mill|theater|theatre)/i;
 const EVENT_RE = /(?:event|calendar|meeting|workshop|program|programme|exhibit|exhibition|festival|fair|lecture|tour|open house|class|demo|demonstration|registration|tickets|admission|rsvp)/i;
-const LOCAL_REGION_RE = /\b(?:ohio|oh|trumbull|warren|mesopotamia|northeast ohio|geauga|portage|ashtabula|mahoning|columbiana|summit|lake|cuyahoga|pennsylvania|pa)\b/i;
+const LOCAL_REGION_RE = /\b(?:ohio|oh|trumbull|warren|mesopotamia|northeast ohio|geauga|portage|ashtabula|mahoning|columbiana|summit|lake|cuyahoga)\b/i;
 
 function splitParam(s) { return String(s || "").split(",").map(x => x.trim()).filter(Boolean); }
 function errorMessage(e) { return e instanceof Error ? (e.message || String(e)) : typeof e === "string" ? e : (() => { try { return JSON.stringify(e); } catch { return String(e); } })(); }
@@ -77,7 +78,7 @@ function host(u) { try { return new URL(u).hostname.toLowerCase(); } catch { ret
 function listEnv(env, key) { return String(env?.[key] || "").split(",").map(x => x.trim()).filter(Boolean); }
 function urlKey(u) { try { const x = new URL(u); return `${x.hostname.toLowerCase()}${x.pathname.replace(/\/$/, "")}`; } catch { return norm(u); } }
 function key(name, u) { return `${norm(name)}|${urlKey(u)}`; }
-function distanceApprox(a, b) { return null; } // kept explicit: no fake distances
+function distanceApprox(a, b) { return null; }
 
 async function fetchText(url, options = {}, budget) {
   if (budget && budget.used >= budget.limit) return { ok: false, status: 0, text: "", error: "fetch budget exhausted", milliseconds: 0, bytes: 0 };
@@ -87,7 +88,7 @@ async function fetchText(url, options = {}, budget) {
     const r = await fetch(url, {
       ...options,
       redirect: "follow",
-      headers: { "User-Agent": `Opportunity-Finder/${VERSION}`, "Accept": "text/html,application/xhtml+xml,application/xml,application/json,text/xml,*/*", ...(options.headers || {}) }
+      headers: { "User-Agent": `Opportunity-Finder/${VERSION}`, "Accept": "text/html,application/xhtml+xml,application/xml,application/json,text/xml,*/*`, ...(options.headers || {}) }
     });
     const text = await r.text();
     return { ok: r.ok, status: r.status, text, milliseconds: Date.now() - started, bytes: text.length, contentType: r.headers.get("content-type") || "" };
@@ -132,7 +133,7 @@ function decodeSearchUrl(href) {
 
 function targetPlaces(city, state) {
   if (/^(OH|Ohio)$/i.test(state)) return [
-    `"${city}" Ohio`, `"Trumbull County" Ohio`, `"Warren" Ohio`, `"Northeast Ohio"`, `"Geauga County" Ohio`, `"Portage County" Ohio`, `"Ashtabula County" Ohio`, `"Mahoning County" Ohio`
+    `"${city}, Ohio"`, `"Trumbull County" Ohio`, `"Warren" Ohio`, `"Northeast Ohio"`, `"Geauga County" Ohio`, `"Portage County" Ohio`, `"Ashtabula County" Ohio`, `"Mahoning County" Ohio`, `"Columbiana County" Ohio`, `"Summit County" Ohio`
   ];
   return [`"${city}" "${state}"`, `"${state}"`];
 }
@@ -164,20 +165,16 @@ function buildEventQueries(org, interests, city, state) {
 }
 
 async function discover(interests, city, state, radius, env) {
-  const budget = { used: 0, limit: Number(env?.DISCOVERY_FETCH_LIMIT || 24) };
+  const budget = { used: 0, limit: Number(env?.DISCOVERY_FETCH_LIMIT || DISCOVERY_BUDGET_DEFAULT) };
   const diagnostics = [], orgCandidates = [], venueCandidates = [];
   const orgQueries = buildOrgQueries(interests, city, state);
 
-  // Stage 1: discover organizations first. Search results are never returned directly.
   for (const query of orgQueries) {
     const r = await searchWeb(query, env, budget);
     diagnostics.push({ stage: "organization-search", source: "search", query, ok: r.ok, status: r.status, parser: r.parser || null, candidates: r.urls.length, milliseconds: r.milliseconds, bytes: r.bytes, error: r.ok ? null : r.error });
-    for (const u of r.urls) {
-      if (acceptDiscoveryUrl(u, state)) orgCandidates.push({ url: u, query });
-    }
+    for (const u of r.urls) if (acceptDiscoveryUrl(u, state)) orgCandidates.push({ url: u, query });
   }
 
-  // Optional trusted seeds can be used to improve recall for obscure local groups.
   for (const u of [...listEnv(env, "GROUP_SEEDS"), ...listEnv(env, "DISCOVERY_SEEDS")]) if (acceptDiscoveryUrl(u, state)) orgCandidates.push({ url: u, query: "configured seed" });
 
   const uniqueOrgUrls = dedupeCandidateUrls(orgCandidates).slice(0, 14);
@@ -193,7 +190,6 @@ async function discover(interests, city, state, radius, env) {
 
   const orgs = dedupeOrganizations(organizations).slice(0, 100);
 
-  // Stage 2: venues are independent discovery anchors, but use the same strict organization validation.
   for (const query of buildVenueQueries(interests, city, state)) {
     const r = await searchWeb(query, env, budget);
     diagnostics.push({ stage: "venue-search", source: "search", query, ok: r.ok, status: r.status, parser: r.parser || null, candidates: r.urls.length, milliseconds: r.milliseconds, bytes: r.bytes, error: r.ok ? null : r.error });
@@ -210,255 +206,165 @@ async function discover(interests, city, state, radius, env) {
 
   const anchors = dedupeOrganizations([...orgs, ...venues]);
 
-  // Stage 3: discover events from validated organization/venue anchors only.
   const events = [];
-  for (const org of anchors.slice(0, 8)) {
-    for (const query of buildEventQueries(org, interests, city, state).slice(0, 2)) {
+  for (const org of anchors.slice(0, 30)) {
+    for (const query of buildEventQueries(org, interests, city, state)) {
       const r = await searchWeb(query, env, budget);
-      diagnostics.push({ stage: "event-search", organization: org.name, query, ok: r.ok, status: r.status, candidates: r.urls.length, milliseconds: r.milliseconds, bytes: r.bytes, error: r.ok ? null : r.error });
-      for (const u of r.urls.slice(0, 4)) {
-        if (!acceptDiscoveryUrl(u, state)) continue;
-        const pr = await fetchText(u, {}, budget);
-        const d = { stage: "event-validation", organization: org.name, url: u, ok: pr.ok, status: pr.status, accepted: 0, rejected: null };
-        if (!pr.ok) { d.rejected = pr.error || `HTTP ${pr.status}`; diagnostics.push(d); continue; }
-        const found = parseEvents(pr.text, u, interests, city, state, org);
-        d.accepted = found.events.length; d.rejected = found.events.length ? null : found.rejectReason; diagnostics.push(d); events.push(...found.events);
+      diagnostics.push({ stage: "event-search", source: "search", query, anchor: org.name, ok: r.ok, status: r.status, parser: r.parser || null, candidates: r.urls.length, milliseconds: r.milliseconds, bytes: r.bytes, error: r.ok ? null : r.error });
+      for (const u of r.urls) if (acceptDiscoveryUrl(u, state)) {
+        const f = await fetchText(u, {}, budget);
+        const d = { stage: "event-validation", url: u, anchor: org.name, ok: f.ok, status: f.status, accepted: 0, rejected: null };
+        if (!f.ok) { d.rejected = f.error || `HTTP ${f.status}`; diagnostics.push(d); continue; }
+        const page = parseEventPage(f.text, u, interests, city, state, org);
+        d.accepted = page.events.length; d.rejected = page.events.length ? null : page.rejectReason; diagnostics.push(d); events.push(...page.events);
       }
     }
+    if (budget.used >= budget.limit) break;
   }
 
-  const uniqueEvents = dedupeBy(events, x => key(x.title, x.url)).slice(0, 100);
-  const uniqueOrganizations = anchors.slice(0, 100);
-  return {
-    ok: true, version: VERSION, build: BUILD, architecture: "organization-first", city, state, radius, interests,
-    stages: { organizationCandidates: orgCandidates.length, validatedOrganizations: orgs.length, validatedAnchors: uniqueOrganizations.length, eventCandidates: events.length, validatedEvents: uniqueEvents.length },
-    counts: { groups: uniqueOrganizations.length, events: uniqueEvents.length, jobs: 0 },
-    groups: uniqueOrganizations,
-    events: uniqueEvents,
-    jobs: [],
-    fetchBudget: budget,
-    diagnostics,
-    notes: [
-      "Organization and venue discovery happens before event discovery.",
-      "A search-engine result is a candidate only; it is not a listing until its page passes validation.",
-      "Organizations require organization/venue evidence plus target-state geographic evidence.",
-      "Events require event-specific evidence and a target-location signal; generic articles are rejected.",
-      "No distance is fabricated when exact geocoding is unavailable.",
-      "Dance-related organizations and events are excluded."
-    ]
-  };
+  const jobs = await discoverJobs(interests, city, state, radius, true, env, budget, diagnostics);
+  return { diagnostic: true, version: VERSION, build: BUILD, requestPath: "/discover", architecture: "organization-first", location: { city, state, radius }, budget, organizations: anchors, events: dedupeEvents(events), jobs: jobs.jobs || [], diagnostics };
+}
+
+async function discoverJobs(interests, city, state, radius, partTime, env, budget, diagnostics) {
+  const localBudget = budget || { used: 0, limit: Number(env?.DISCOVERY_FETCH_LIMIT || DISCOVERY_BUDGET_DEFAULT) };
+  const ds = diagnostics || [];
+  const jobs = [];
+  const queries = [
+    `${city} Ohio part time jobs ${interests.slice(0, 2).join(" ")} -dance`,
+    `Trumbull County Ohio part time jobs ${interests.slice(0, 2).join(" ")} -dance`,
+    `Warren Ohio part time jobs ${interests.slice(0, 2).join(" ")} -dance`
+  ];
+  for (const query of queries) {
+    const r = await searchWeb(query, env, localBudget);
+    ds.push({ stage: "job-search", source: "search", query, ok: r.ok, status: r.status, parser: r.parser || null, candidates: r.urls.length, milliseconds: r.milliseconds, bytes: r.bytes, error: r.ok ? null : r.error });
+    for (const u of r.urls) {
+      if (isObviousOutOfState(u, state) || JUNK_HOST_RE.test(host(u))) continue;
+      const f = await fetchText(u, {}, localBudget);
+      if (!f.ok) continue;
+      const page = parseJobPage(f.text, u, interests, city, state, partTime);
+      ds.push({ stage: "job-validation", url: u, query, ok: f.ok, status: f.status, accepted: page.jobs.length, rejected: page.jobs.length ? null : page.rejectReason });
+      jobs.push(...page.jobs);
+    }
+    if (localBudget.used >= localBudget.limit) break;
+  }
+  const usa = await usaJobs(interests, city, state, radius, partTime, env, localBudget, ds);
+  jobs.push(...usa.jobs);
+  return { jobs: dedupeJobs(jobs), diagnostics: ds, budget: localBudget };
+}
+
+async function usaJobs(interests, city, state, radius, partTime, env, budget, diagnostics) {
+  const jobs = [];
+  const endpoint = env?.USAJOBS_ENDPOINT || "https://data.usajobs.gov/api/search";
+  const keyHeader = env?.USAJOBS_API_KEY || "";
+  if (!keyHeader) return { jobs, skipped: true };
+  const u = new URL(endpoint);
+  u.searchParams.set("LocationName", `${city}, ${state}`);
+  u.searchParams.set("Keyword", interests.slice(0, 3).join(" "));
+  u.searchParams.set("ResultsPerPage", "25");
+  const r = await fetchText(u.href, { headers: { "Authorization-Key": keyHeader, "Host": env?.USAJOBS_USER_AGENT || "Opportunity Finder" } }, budget);
+  diagnostics.push({ stage: "usajobs", ok: r.ok, status: r.status, candidates: 0, error: r.ok ? null : r.error });
+  if (!r.ok) return { jobs };
+  try {
+    const data = JSON.parse(r.text);
+    for (const x of data?.SearchResult?.SearchResultItems || []) {
+      const j = x?.MatchedObjectDescriptor;
+      if (!j) continue;
+      jobs.push({ title: clean(j.PositionTitle), employer: clean(j.OrganizationName), url: j.PositionURI, source: "USAJOBS", location: clean((j.PositionLocation || []).map(v => v?.LocationName).filter(Boolean).join("; ")), partTime: /part time/i.test(JSON.stringify(j)) });
+    }
+  } catch (e) { diagnostics.push({ stage: "usajobs-parse", ok: false, error: errorMessage(e) }); }
+  return { jobs };
 }
 
 function acceptDiscoveryUrl(u, state) {
   if (!isHttp(u)) return false;
-  try {
-    const x = new URL(u);
-    if (JUNK_HOST_RE.test(x.hostname)) return false;
-    if (isObviousOutOfState(x.href, state)) return false;
-    return true;
-  } catch { return false; }
+  if (JUNK_HOST_RE.test(host(u))) return false;
+  if (DANCE_RE.test(u)) return false;
+  if (isObviousOutOfState(u, state)) return false;
+  return true;
 }
+
 function isObviousOutOfState(u, state) {
-  if (/^(OH|Ohio)$/i.test(state)) return /\b(?:new jersey|nj|new york|ny|pennsylvania|pa|michigan|mi|indiana|in|kentucky|ky|west virginia|wv)\b/i.test(u) && !LOCAL_REGION_RE.test(u);
-  return false;
+  if (!/^(OH|Ohio)$/i.test(state)) return false;
+  const t = norm(u);
+  const outside = /\b(?:new jersey|new york|pennsylvania|michigan|indiana|kentucky|west virginia)\b/.test(t);
+  const ohio = /\b(?:ohio|trumbull|warren|northeast ohio|geauga|portage|ashtabula|mahoning|columbiana|summit|lake|cuyahoga)\b/.test(t);
+  return outside && !ohio;
 }
-function dedupeCandidateUrls(arr) { const m = new Map(); for (const x of arr) if (!m.has(urlKey(x.url))) m.set(urlKey(x.url), x); return [...m.values()]; }
-function dedupeOrganizations(arr) { return dedupeBy(arr, x => key(x.name, x.url)).sort((a, b) => (b.confidence - a.confidence) || (b.score - a.score)); }
-function dedupeBy(arr, fn) { const m = new Map(); for (const x of arr) { const k = fn(x); if (!k || m.has(k)) continue; m.set(k, x); } return [...m.values()]; }
 
-function parseOrganizationPage(html, baseUrl, interests, city, state, venueMode = false) {
-  const base = new URL(baseUrl), text = clean(html), title = clean((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || ""), desc = clean((html.match(/<meta[^>]+(?:name|property)=["'](?:description|og:description)["'][^>]+content=["']([^"']*)/i) || [])[1] || "");
-  const evidence = [];
-  if (ORG_RE.test(`${title} ${desc} ${text.slice(0, 8000)}`)) evidence.push("organization-language");
-  if (VENUE_RE.test(`${title} ${desc}`)) evidence.push("venue-language");
-  if (LOCAL_REGION_RE.test(text.slice(0, 10000))) evidence.push("regional-language");
-  if (new RegExp(`\\b${escapeRe(city)}\\b`, "i").test(text)) evidence.push("city-name");
-  if (DANCE_RE.test(`${title} ${desc}`)) return { organizations: [], evidence, rejectReason: "dance exclusion" };
-  if (ARTICLE_RE.test(title) && !ORG_RE.test(`${title} ${desc}`)) return { organizations: [], evidence, rejectReason: "article/publisher page" };
-
-  const structured = extractOrganizationStructuredData(html);
-  const structuredLocations = structured.map(x => formatLocation(x.address || x.location || x.areaServed)).filter(Boolean);
-  const structuredText = structuredLocations.join(" ");
-  if (structuredText) evidence.push("structured-location");
-  if (structuredText && hardOutOfArea(structuredText, city, state)) return { organizations: [], evidence, rejectReason: "structured address is outside target area" };
-
-  const combined = `${title} ${desc} ${structuredText} ${text.slice(0, 12000)}`;
-  const orgEvidence = ORG_RE.test(combined), venueEvidence = VENUE_RE.test(combined);
-  const localEvidence = geographicEvidence(combined, city, state);
-  if (hardOutOfArea(combined, city, state) && !new RegExp(`\\b${escapeRe(city)}\\b`, "i").test(combined)) return { organizations: [], evidence, rejectReason: "page contains a contradictory out-of-area location" };
-  if ((!orgEvidence && !venueEvidence) || localEvidence.score < 30) {
-    return { organizations: [], evidence, rejectReason: !orgEvidence && !venueEvidence ? "insufficient organization/venue evidence" : "insufficient geographic evidence" };
+function geographicEvidence(text, city, state, extra = {}) {
+  const t = norm(text), cityNorm = norm(city);
+  let score = 0;
+  if (/^(OH|Ohio)$/i.test(state)) {
+    if (/\bohio\b/.test(t)) score += 40;
+    if (cityNorm && t.includes(cityNorm)) score += 45;
+    if (/\b(?:trumbull|warren|northeast ohio|geauga|portage|ashtabula|mahoning|columbiana|summit|lake|cuyahoga)\b/.test(t)) score += 25;
+    if (extra.structuredText && /\bohio\b/i.test(extra.structuredText)) score += 20;
+    if (extra.structuredText && cityNorm && norm(extra.structuredText).includes(cityNorm)) score += 30;
+  } else {
+    if (state && t.includes(norm(state))) score += 40;
+    if (cityNorm && t.includes(cityNorm)) score += 45;
   }
-  const name = selectOrganizationName(title, desc, base.hostname, venueMode);
-  if (!name || name.length < 3 || name.length > 180) return { organizations: [], evidence, rejectReason: "weak organization name" };
-  const score = relevanceScore(`${name} ${desc}`, interests);
-  return { organizations: [{
-    id: key(name, base.href), name, url: base.href, description: desc.slice(0, 900),
-    type: classifyOrg(`${name} ${desc}`), confidence: Math.min(100, 55 + (orgEvidence ? 18 : 10) + (venueEvidence ? 12 : 0) + localEvidence.score / 4 + Math.min(score, 15)),
-    score: score + localEvidence.score, location: extractLocation(text, city, state), source: "validated public page", discoveryQuality: "verified", locationScore: localEvidence.score
-  }], evidence, rejectReason: null };
+  return { score: Math.min(100, score) };
 }
-function extractOrganizationStructuredData(html) {
-  const out = [];
-  for (const m of html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
-    try {
-      for (const x of flattenJsonLd(JSON.parse(m[1].trim()))) {
-        const type = Array.isArray(x["@type"]) ? x["@type"].join(" ") : String(x["@type"] || "");
-        if (/Organization|LocalBusiness|Museum|CivicStructure|Place/i.test(type)) out.push(x);
-      }
-    } catch {}
-  }
-  return out;
-}
+
 function hardOutOfArea(text, city, state) {
   if (!/^(OH|Ohio)$/i.test(state)) return false;
   const t = norm(text);
-  const hasOhio = /\b(?:ohio|oh|trumbull|warren|mesopotamia|northeast ohio|geauga|portage|ashtabula|mahoning|columbiana|summit|lake|cuyahoga)\b/.test(t);
-  const hasOutside = /\b(?:new jersey|nj|new york|ny|pennsylvania|pa|michigan|mi|indiana|in|kentucky|ky|west virginia|wv)\b/.test(t);
-  return hasOutside && !hasOhio;
+  const local = /\b(?:ohio|trumbull|warren|northeast ohio|geauga|portage|ashtabula|mahoning|columbiana|summit|lake|cuyahoga)\b/.test(t);
+  const outside = /\b(?:new jersey|new york|pennsylvania|michigan|indiana|kentucky|west virginia)\b/.test(t);
+  return outside && !local;
 }
 
-function selectOrganizationName(title, desc, hostname, venueMode) {
-  const first = clean(title).replace(/\s*[|–—-]\s*.+$/, "").trim();
-  if (first && !ARTICLE_RE.test(first) && first.length >= 3) return first;
-  const h = hostname.replace(/^www\./, "").split(".")[0].replace(/[-_]+/g, " ").trim();
-  return h ? h.replace(/\b\w/g, c => c.toUpperCase()) : "";
+function parseOrganizationPage(html, url, interests, city, state, venue = false) {
+  const text = clean(html);
+  const title = clean((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [,""])[1]);
+  const structured = [...html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)].map(m => clean(m[1])).join(" ");
+  const evidence = geographicEvidence(`${title} ${text.slice(0, 12000)}`, city, state, { structuredText: structured });
+  const obviousArticle = ARTICLE_RE.test(`${title} ${text.slice(0, 4000)}`) && !ORG_RE.test(`${title} ${text.slice(0, 4000)}`);
+  const localEnough = evidence.score >= 50 && !hardOutOfArea(`${title} ${text.slice(0, 12000)}`, city, state);
+  const typeMatch = venue ? VENUE_RE.test(`${title} ${text.slice(0, 5000)}`) : ORG_RE.test(`${title} ${text.slice(0, 5000)}`);
+  const interestMatch = interests.length ? interests.some(i => norm(`${title} ${text.slice(0, 7000)}`).includes(norm(i))) : true;
+  if (!localEnough) return { organizations: [], evidence: [{ score: evidence.score, localEnough, title }], rejectReason: "insufficient local geographic evidence" };
+  if (obviousArticle) return { organizations: [], evidence: [{ score: evidence.score, localEnough, title }], rejectReason: "article/news content" };
+  if (!typeMatch) return { organizations: [], evidence: [{ score: evidence.score, localEnough, title }], rejectReason: venue ? "not a venue" : "not an organization" };
+  if (DANCE_RE.test(`${title} ${text.slice(0, 10000)}`)) return { organizations: [], evidence: [{ score: evidence.score, localEnough, title }], rejectReason: "dance exclusion" };
+  return { organizations: [{ name: title || new URL(url).hostname, url, type: venue ? "venue" : "organization", locationScore: evidence.score, interestMatch }], evidence: [{ score: evidence.score, localEnough, title }] };
 }
-function classifyOrg(t) {
-  const x = norm(t);
-  if (/beekeep|apiary|beekeepers association/.test(x)) return "beekeeping";
-  if (/blacksmith|smithing|forge|farrier/.test(x)) return "blacksmithing";
-  if (/reenact|living history|sca|society for creative anachronism/.test(x)) return "reenactment";
-  if (/museum|historical society|heritage|preservation|history center|historic site/.test(x)) return "museum/historical";
-  if (/nature|native plant|conservation|hiking|trail|outdoor/.test(x)) return "nature/outdoors";
-  if (/garden|horticultural|master gardener|botanical/.test(x)) return "gardening";
-  if (/woodworking|woodturning|woodworker/.test(x)) return "woodworking";
-  if (/astronomy|observatory|stargazing/.test(x)) return "astronomy";
-  if (/cycling|bicycle|bike club/.test(x)) return "cycling";
-  if (/guild|craft|artisan|maker/.test(x)) return "traditional crafts";
-  return "community organization";
-}
-function geographicEvidence(text, city, state) {
-  const t = norm(text), wantedState = /^(OH|Ohio)$/i.test(state) ? ["ohio", "oh"] : [norm(state)];
-  let score = 0;
-  if (wantedState.some(x => t.includes(x))) score += 35;
-  if (city && t.includes(norm(city))) score += 35;
-  if (/trumbull|warren|northeast ohio|geauga|portage|ashtabula|mahoning|columbiana|summit|lake|cuyahoga/.test(t)) score += 25;
-  return { score: Math.min(100, score) };
-}
-function extractLocation(text, city, state) {
-  const m = text.match(new RegExp(`.{0,80}\\b${escapeRe(city)}\\b.{0,80}`, "i"));
-  return clean(m ? m[0] : `${city}, ${state}`);
-}
-function escapeRe(s) { return String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
 
-function parseEvents(html, baseUrl, interests, city, state, org) {
-  const base = new URL(baseUrl), events = [], text = clean(html), evidence = [];
-  const jsonld = [];
-  for (const m of html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
-    try { jsonld.push(...flattenJsonLd(JSON.parse(m[1].trim()))); } catch {}
-  }
-  for (const x of jsonld) {
-    const type = Array.isArray(x["@type"]) ? x["@type"].join(" ") : String(x["@type"] || "");
-    if (!/Event/i.test(type) || !x.name || !x.startDate) continue;
-    const location = formatLocation(x.location), combined = `${x.name} ${x.description || ""} ${location} ${typeof x.organizer === "object" ? x.organizer?.name || "" : x.organizer || ""}`;
-    if (DANCE_RE.test(combined)) continue;
-    const geo = geographicEvidence(combined + " " + text.slice(0, 8000), city, state);
-    if (geo.score < 30) continue;
-    events.push({ id: key(x.name, x.url || base.href), title: clean(x.name), description: clean(x.description || "").slice(0, 1000), url: abs(x.url || base.href, base), date: x.startDate, endDate: x.endDate || "", location, organizer: clean(typeof x.organizer === "object" ? x.organizer?.name || org.name : x.organizer || org.name), source: "JSON-LD Event", score: relevanceScore(combined, interests) + geo.score, type: "event", discoveryQuality: "verified", locationScore: geo.score, host: org.name });
-  }
-  if (events.length) evidence.push("JSON-LD Event");
-
-  // HTML fallback: only blocks that contain a date AND explicit event language.
-  for (const m of html.matchAll(/<(?:article|section|div|li)[^>]*(?:class|id)=["'][^"']*(?:event|calendar|meeting|program|workshop|exhibit|exhibition|festival|fair)[^"']*["'][^>]*>([\s\S]*?)<\/(?:article|section|div|li)>/gi)) {
-    const block = clean(m[1]);
-    const date = findDate(block);
-    if (!date || !EVENT_RE.test(block) || DANCE_RE.test(block) || ARTICLE_RE.test(block.slice(0, 500))) continue;
-    const geo = geographicEvidence(block + " " + text.slice(0, 5000), city, state);
-    if (geo.score < 30) continue;
-    const h = clean((m[1].match(/<h[1-4][^>]*>([\s\S]*?)<\/h[1-4]>/i) || [])[1] || block.slice(0, 160));
-    if (h.length < 4) continue;
-    events.push({ id: key(h, base.href + "#" + date), title: h, description: block.slice(0, 1000), url: base.href, date, endDate: "", location: extractLocation(block, city, state), organizer: org.name, source: "validated event block", score: relevanceScore(block, interests) + geo.score, type: "event", discoveryQuality: "verified", locationScore: geo.score, host: org.name });
-  }
-  if (events.length && !evidence.includes("HTML event block")) evidence.push("HTML event block");
-  if (!events.length) return { events: [], evidence, rejectReason: !EVENT_RE.test(text) ? "no event-specific evidence" : "no validated local event" };
-  return { events: dedupeBy(events, x => key(x.title, x.url + x.date)), evidence, rejectReason: null };
+function parseEventPage(html, url, interests, city, state, anchor) {
+  const text = clean(html), title = clean((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [,""])[1]);
+  const evidence = geographicEvidence(`${title} ${text.slice(0, 10000)}`, city, state);
+  if (evidence.score < 45 || hardOutOfArea(`${title} ${text.slice(0, 10000)}`, city, state)) return { events: [], rejectReason: "insufficient local geographic evidence" };
+  if (!EVENT_RE.test(`${title} ${text.slice(0, 7000)}`)) return { events: [], rejectReason: "not an event page" };
+  if (DANCE_RE.test(`${title} ${text.slice(0, 10000)}`)) return { events: [], rejectReason: "dance exclusion" };
+  return { events: [{ title: title || "Local event", url, anchor: anchor.name, locationScore: evidence.score }] };
 }
-function flattenJsonLd(x) { if (Array.isArray(x)) return x.flatMap(flattenJsonLd); if (x && typeof x === "object") return [x, ...(Array.isArray(x["@graph"]) ? x["@graph"].flatMap(flattenJsonLd) : [])]; return []; }
-function formatLocation(x) { if (!x) return ""; if (typeof x === "string") return clean(x); if (Array.isArray(x)) return x.map(formatLocation).filter(Boolean).join("; "); return [x.name, x.streetAddress, x.addressLocality, x.addressRegion, x.postalCode].filter(Boolean).map(clean).join(", "); }
-function findDate(t) { const m = String(t).match(/\b(?:20\d{2}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[/-]\d{1,2}[/-]20\d{2}|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:,\s*20\d{2})?)\b/i); return m ? m[0] : ""; }
-function relevanceScore(text, interests) { const t = norm(text); let s = 0; for (const i of interests) { const q = norm(i); if (!q) continue; if (t.includes(q)) s += 10; for (const w of q.split(" ").filter(x => x.length > 3)) if (t.includes(w)) s += 2; } return s; }
 
-async function discoverJobs(interests, city, state, radius, partTime, env) {
-  const diagnostics = [], items = [];
-  const budget = { used: 0, limit: Number(env?.JOB_FETCH_LIMIT || 18) };
-  const publicQueries = buildJobQueries(interests, city, state);
-
-  for (const query of publicQueries) {
-    const r = await searchWeb(query, env, budget);
-    diagnostics.push({ stage: "job-search", source: "search", query, ok: r.ok, status: r.status, candidates: r.urls.length, milliseconds: r.milliseconds, bytes: r.bytes, error: r.ok ? null : r.error });
-    for (const u of r.urls.slice(0, 5)) {
-      if (!acceptDiscoveryUrl(u, state)) continue;
-      const pr = await fetchText(u, {}, budget);
-      const d = { stage: "job-validation", url: u, ok: pr.ok, status: pr.status, accepted: 0, rejected: null };
-      if (!pr.ok) { d.rejected = pr.error || `HTTP ${pr.status}`; diagnostics.push(d); continue; }
-      const found = parseJobs(pr.text, u, interests, city, state);
-      d.accepted = found.length; d.rejected = found.length ? null : "no validated local JobPosting/career opportunity"; diagnostics.push(d); items.push(...found);
-    }
-  }
-
-  if (env?.USAJOBS_KEY && env?.USAJOBS_EMAIL) {
-    const qs = buildUSAQueries(interests);
-    const requests = qs.slice(0, 4).map(q => ({ query: q, promise: usaJobsRequest(q, city, state, radius, partTime, env) }));
-    const settled = await Promise.allSettled(requests.map(x => x.promise));
-    for (let i = 0; i < settled.length; i++) {
-      const meta = requests[i];
-      if (settled[i].status === "rejected") { diagnostics.push({ stage: "USAJOBS", query: meta.query, ok: false, status: 0, error: errorMessage(settled[i].reason) }); continue; }
-      const r = settled[i].value, d = { stage: "USAJOBS", query: meta.query, ok: r.ok, status: r.status, milliseconds: r.milliseconds, bytes: r.bytes, accepted: 0, rejected: null };
-      if (!r.ok) { d.rejected = r.error || `HTTP ${r.status}`; diagnostics.push(d); continue; }
-      try {
-        const data = JSON.parse(r.text), found = data.SearchResult?.SearchResultItems || [];
-        d.apiResults = found.length;
-        for (const x of found) {
-          const m = x.MatchedObjectDescriptor || {}, title = m.PositionTitle || "USAJOBS opportunity", summary = m.UserArea?.Details?.JobSummary || m.QualificationSummary || "", location = m.PositionLocationDisplay || "";
-          const text = `${title} ${m.OrganizationName || ""} ${summary} ${location}`;
-          if (DANCE_RE.test(text)) continue;
-          const geo = geographicEvidence(`${location} ${summary}`, city, state);
-          if (geo.score < 30) continue;
-          items.push({ id: x.MatchedObjectId || m.PositionID || "", title, organization: m.OrganizationName || "", department: m.DepartmentName || "", location, url: m.PositionURI || "https://www.usajobs.gov/", applyUrl: Array.isArray(m.ApplyURI) ? (m.ApplyURI[0] || "") : (m.ApplyURI || ""), source: "USAJOBS", date: m.PublicationStartDate || "", closeDate: m.ApplicationCloseDate || "", schedule: (m.PositionSchedule || []).map(v => v.Name || v.Value || "").join(", "), salary: [m.PositionRemuneration?.[0]?.MinimumRange, m.PositionRemuneration?.[0]?.MaximumRange].filter(Boolean).join("–"), summary: stripHtml(summary).slice(0, 900), type: "job", discoveryQuality: "verified", locationScore: geo.score, score: relevanceScore(text, interests) + geo.score });
-          d.accepted++;
-        }
-        d.rejected = d.accepted ? null : "no local USAJOBS records passed geographic validation";
-      } catch { d.rejected = "USAJOBS invalid JSON"; }
-      diagnostics.push(d);
-    }
-  } else diagnostics.push({ stage: "USAJOBS", ok: false, status: 0, accepted: 0, rejected: "credentials not configured" });
-
-  const unique = dedupeBy(items, x => x.id || key(x.title, x.url)).sort((a, b) => b.score - a.score).slice(0, 100);
-  return { ok: true, version: VERSION, build: BUILD, architecture: "separate employer discovery", city, state, radius, partTime, interests, rawCount: items.length, uniqueCount: unique.length, items: unique, jobs: unique, groups: [], events: [], fetchBudget: budget, diagnostics, notes: ["Employer discovery is separate from organization/event discovery.", "Public career pages are candidates only and must contain local JobPosting or strong local opportunity evidence.", "USAJOBS remains integrated and is subject to the same geographic validation.", "Dance-related jobs are excluded."] };
+function parseJobPage(html, url, interests, city, state, partTime) {
+  const text = clean(html), title = clean((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [,""])[1]);
+  const structured = [...html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)].map(m => m[1]).join(" ");
+  if (!/JobPosting/i.test(structured)) return { jobs: [], rejectReason: "no JSON-LD JobPosting" };
+  const evidence = geographicEvidence(`${title} ${text.slice(0, 12000)}`, city, state, { structuredText: structured });
+  if (evidence.score < 45 || hardOutOfArea(`${title} ${text.slice(0, 12000)}`, city, state)) return { jobs: [], rejectReason: "insufficient local geographic evidence" };
+  if (partTime && !/part[\s-]?time/i.test(`${structured} ${text}`)) return { jobs: [], rejectReason: "not part-time" };
+  return { jobs: [{ title: title || "Local job", url, locationScore: evidence.score }] };
 }
-function buildJobQueries(interests, city, state) { const base = interestBase(interests).slice(0, 6), p = `"${city}" ${state}`; return [...new Set(base.map(x => `"${x}" ${p} (jobs OR careers OR employment OR hiring) -dance`))].slice(0, 6); }
-function buildUSAQueries(interests) { const src = interests.length ? interests : ["museum archaeology historic preservation", "welder fabrication woodworking", "bicycle mechanic", "parks recreation cultural resources"]; return [...new Set(src)].slice(0, 4); }
-function parseJobs(html, baseUrl, interests, city, state) {
-  const base = new URL(baseUrl), text = clean(html), jobs = [];
-  const jsonld = [];
-  for (const m of html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) { try { jsonld.push(...flattenJsonLd(JSON.parse(m[1].trim()))); } catch {} }
-  for (const x of jsonld) {
-    const type = Array.isArray(x["@type"]) ? x["@type"].join(" ") : String(x["@type"] || ""); if (!/JobPosting/i.test(type) || !x.title) continue;
-    const loc = formatLocation(x.jobLocation), org = typeof x.hiringOrganization === "object" ? x.hiringOrganization?.name || "" : x.hiringOrganization || "", combined = `${x.title} ${org} ${x.description || ""} ${loc}`;
-    if (DANCE_RE.test(combined)) continue;
-    const geo = geographicEvidence(`${loc} ${x.description || ""}`, city, state); if (geo.score < 30) continue;
-    jobs.push({ id: key(x.title, x.url || base.href), title: clean(x.title), organization: clean(org), url: abs(x.url || base.href, base), description: clean(x.description || "").slice(0, 1100), date: x.datePosted || "", closeDate: x.validThrough || "", location: loc, employmentType: clean(x.employmentType || ""), source: "JSON-LD JobPosting", score: relevanceScore(combined, interests) + geo.score, type: "job", discoveryQuality: "verified", locationScore: geo.score });
-  }
-  // A career link by itself is intentionally NOT accepted as a job. This is the key 3.8 change.
-  return dedupeBy(jobs, x => key(x.title, x.url));
-}
-async function usaJobsRequest(query, city, state, radius, partTime, env) {
-  const u = new URL("https://data.usajobs.gov/api/search"); u.searchParams.set("Keyword", query); u.searchParams.set("LocationName", [city, state].filter(Boolean).join(", ")); u.searchParams.set("Radius", String(radius)); u.searchParams.set("ResultsPerPage", "50"); u.searchParams.set("Fields", "Full"); if (partTime) u.searchParams.set("PositionScheduleTypeCode", "2");
-  return fetchText(u.href, { headers: { "Host": "data.usajobs.gov", "User-Agent": env.USAJOBS_EMAIL, "Authorization-Key": env.USAJOBS_KEY } }, null);
-}
-async function diagnostics(env, requestPath) {
-  const cf = await fetchText("https://www.cloudflare.com/"), uj = await fetchText("https://data.usajobs.gov/api/codelist/positionscheduletypes");
-  const keyPresent = !!env?.USAJOBS_KEY, emailPresent = !!env?.USAJOBS_EMAIL;
-  return { diagnostic: true, version: VERSION, build: BUILD, requestPath, architecture: "organization-first", secretBindings: { USAJOBS_KEY: keyPresent, USAJOBS_EMAIL: emailPresent }, connectivity: { Cloudflare: { ok: cf.ok, status: cf.status }, USAJOBS: { ok: uj.ok, status: uj.status } }, configuredFeeds: listEnv(env, "WORKER_FEEDS").length };
+
+function dedupeCandidateUrls(xs) { const m = new Map(); for (const x of xs) { const k = urlKey(x.url); if (!m.has(k)) m.set(k, x); } return [...m.values()]; }
+function dedupeOrganizations(xs) { const m = new Map(); for (const x of xs) { const k = key(x.name, x.url); if (!m.has(k)) m.set(k, x); } return [...m.values()]; }
+function dedupeEvents(xs) { const m = new Map(); for (const x of xs) { const k = `${norm(x.title)}|${urlKey(x.url)}`; if (!m.has(k)) m.set(k, x); } return [...m.values()]; }
+function dedupeJobs(xs) { const m = new Map(); for (const x of xs) { const k = `${norm(x.title)}|${urlKey(x.url)}`; if (!m.has(k)) m.set(k, x); } return [...m.values()]; }
+
+async function diagnostics(env, path) {
+  const budget = { used: 0, limit: Number(env?.DISCOVERY_FETCH_LIMIT || DISCOVERY_BUDGET_DEFAULT) };
+  const tests = [];
+  const samples = [
+    { name: "ancient Mesopotamia", text: "Mesopotamia was an ancient civilization between the Tigris and Euphrates rivers." },
+    { name: "local Ohio group", text: "Trumbull County Ohio beekeepers association in Mesopotamia Ohio" },
+    { name: "Warren Ohio", text: "Warren Ohio historical society Trumbull County" },
+    { name: "out of state", text: "New York historical society" }
+  ];
+  for (const s of samples) tests.push({ name: s.name, evidence: geographicEvidence(s.text, "Mesopotamia", "OH"), hardOutOfArea: hardOutOfArea(s.text, "Mesopotamia", "OH") });
+  return { diagnostic: true, version: VERSION, build: BUILD, requestPath: path, architecture: "organization-first", discoveryFetchLimit: budget.limit, tests };
 }
