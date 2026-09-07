@@ -1,0 +1,1 @@
+Phase 3.9 frontend is packaged for local testing in the conversation artifact. The GitHub branch contains the Worker; the complete frontend bundle is being validated before it is committed as the final web UI.
