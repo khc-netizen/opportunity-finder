@@ -17,20 +17,48 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-      - name: Repair dynamic geographic regexes
+      - name: Repair geographic matching
         run: |
           python3 - <<'PY'
           from pathlib import Path
           p = Path('worker/index.js')
           s = p.read_text()
-          replacements = [
-              (r'new RegExp("\\b" + escapeRe(k.split(",")[0]) + "\\b", "i")', r'new RegExp("\\\\b" + escapeRe(k.split(",")[0]) + "\\\\b", "i")'),
-              (r'new RegExp("\\b" + escapeRe(norm(city)) + "\\b", "i")', r'new RegExp("\\\\b" + escapeRe(norm(city)) + "\\\\b", "i")'),
-              (r'new RegExp(".{0,80}\\b" + escapeRe(city) + "\\b.{0,80}", "i")', r'new RegExp(".{0,80}\\\\b" + escapeRe(city) + "\\\\b.{0,80}", "i")'),
-              (r'new RegExp(`\\b${escapeRe(city)}\\b`, "i")', r'new RegExp("\\\\b" + escapeRe(city) + "\\\\b", "i")')
-          ]
-          for old, new in replacements:
-              s = s.replace(old, new)
+          cs = s.index('function cityKey(')
+          ce = s.index('function estimateDistance(', cs)
+          city_fn = '''function cityKey(text) {
+            const t = norm(text);
+            const padded = ` ${t} `;
+            for (const k of Object.keys(CITY_COORDS).sort((a,b) => b.length - a.length)) {
+              const name = norm(k.split(",")[0]);
+              if (padded.includes(` ${name} `)) return k;
+            }
+            return null;
+          }
+          '''
+          s = s[:cs] + city_fn + s[ce:]
+          gs = s.index('function geographicEvidence(')
+          ge = s.index('function extractLocation(', gs)
+          geo_fn = '''function geographicEvidence(text, city, state) {
+            const t = norm(text), padded = ` ${t} `;
+            if (/^(OH|Ohio)$/i.test(state)) {
+              const hasOhio = /\\bohio\\b/.test(t);
+              const hasOhioAbbr = /\\boh\\b/.test(t);
+              const hasState = hasOhio || hasOhioAbbr;
+              const hasCity = !!city && padded.includes(` ${norm(city)} `);
+              const hasCountyOrRegion = /\\b(?:trumbull county|trumbull|warren|northeast ohio|geauga county|geauga|portage county|portage|ashtabula county|ashtabula|mahoning county|mahoning|columbiana county|columbiana|summit county|summit|lake county|lake|cuyahoga county|cuyahoga)\\b/.test(t);
+              let score = 0;
+              if (hasState) score += 45;
+              if (hasCity && hasState) score += 35;
+              if (hasCountyOrRegion && hasState) score += 20;
+              return { score: Math.min(100, score), hasOhio, hasOhioAbbr, hasState, hasCity, hasCountyOrRegion };
+            }
+            const wantedState = norm(state);
+            const hasState = !!wantedState && padded.includes(` ${wantedState} `);
+            const hasCity = !!city && padded.includes(` ${norm(city)} `);
+            return { score: (hasState ? 50 : 0) + (hasCity && hasState ? 50 : 0), hasState, hasCity };
+          }
+          '''
+          s = s[:gs] + geo_fn + s[ge:]
           s = s.replace('const BUILD = "v3.9.6-neo-rls-geographic-validation";', 'const BUILD = "v3.9.6-neo-rls-geographic-validation-final";', 1)
           p.write_text(s)
           PY
@@ -39,6 +67,7 @@ jobs:
         run: |
           node --input-type=module <<'JS'
           import { parseNeoRlsJobs, estimateDistance } from './worker/index.js';
+          console.log('Distances', estimateDistance('Mesopotamia, OH','Warren, OH'), estimateDistance('Mesopotamia, OH','Garrettsville, OH'));
           if (estimateDistance('Mesopotamia, OH','Warren, OH') !== 18) throw new Error('Warren distance failed');
           if (estimateDistance('Mesopotamia, OH','Garrettsville, OH') !== 14) throw new Error('Garrettsville distance failed');
           const r = await fetch('https://www.neo-rls.org/view_job_postings.php');
