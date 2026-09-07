@@ -188,8 +188,12 @@ function buildEventQueries(org, interests, city, state) {
 
 async function discover(interests, city, state, radius, env) {
   const budget = { used: 0, limit: Number(env?.DISCOVERY_FETCH_LIMIT || 72) };
-  const diagnostics = [], orgCandidates = [], venueCandidates = [];
-  const orgQueries = buildOrgQueries(interests, city, state);
+const diagnostics = [], venueCandidates = [];
+// Put trusted local seeds first so generic search-engine articles cannot consume the validation budget.
+const orgCandidates = [...BUILTIN_DISCOVERY_SEEDS, ...listEnv(env, "GROUP_SEEDS"), ...listEnv(env, "DISCOVERY_SEEDS")]
+  .filter(u => acceptDiscoveryUrl(u, state))
+  .map(u => ({ url: u, query: "trusted discovery seed" }));
+const orgQueries = buildOrgQueries(interests, city, state);
 
   // Stage 1: discover organizations first. Search results are never returned directly.
   for (const query of orgQueries) {
@@ -295,8 +299,11 @@ function dedupeBy(arr, fn) { const m = new Map(); for (const x of arr) { const k
 function parseOrganizationPage(html, baseUrl, interests, city, state, venueMode = false, radius = 75) {
   const base = new URL(baseUrl), text = clean(html), title = clean((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || ""), desc = clean((html.match(/<meta[^>]+(?:name|property)=["'](?:description|og:description)["'][^>]+content=["']([^"']*)/i) || [])[1] || "");
   const evidence = [];
-  if (ORG_RE.test(`${title} ${desc} ${text.slice(0, 8000)}`)) evidence.push("organization-language");
-  if (VENUE_RE.test(`${title} ${desc}`)) evidence.push("venue-language");
+// Organization/venue evidence must come from page identity metadata (title/description)
+// or the opening page text, not from arbitrary article body text.
+const identityText = `${title} ${desc} ${text.slice(0, 1800)}`;
+if (ORG_RE.test(identityText)) evidence.push("organization-language");
+if (VENUE_RE.test(identityText)) evidence.push("venue-language");
   if (LOCAL_REGION_RE.test(text.slice(0, 10000))) evidence.push("regional-language");
   if (new RegExp(`\\b${escapeRe(city)}\\b`, "i").test(text)) evidence.push("city-name");
   if (DANCE_RE.test(`${title} ${desc}`)) return { organizations: [], evidence, rejectReason: "dance exclusion" };
@@ -309,7 +316,12 @@ function parseOrganizationPage(html, baseUrl, interests, city, state, venueMode 
   if (structuredText && hardOutOfArea(structuredText, city, state)) return { organizations: [], evidence, rejectReason: "structured address is outside target area" };
 
   const combined = `${title} ${desc} ${structuredText} ${text.slice(0, 12000)}`;
-  const orgEvidence = ORG_RE.test(combined), venueEvidence = VENUE_RE.test(combined);
+const orgEvidence = ORG_RE.test(identityText) || /Organization|LocalBusiness|Museum|CivicStructure/i.test(
+  structured.map(x => Array.isArray(x["@type"]) ? x["@type"].join(" ") : String(x["@type"] || "")).join(" ")
+);
+const venueEvidence = VENUE_RE.test(identityText) || /Museum|CivicStructure|Place/i.test(
+  structured.map(x => Array.isArray(x["@type"]) ? x["@type"].join(" ") : String(x["@type"] || "")).join(" ")
+);
   const localEvidence = geographicEvidence(combined, city, state);
   const distance = estimateDistance(`${city}, ${state}`, `${structuredText} ${text.slice(0, 12000)}`);
   if (distance != null && distance > radius) return { organizations: [], evidence, rejectReason: `outside requested radius (${distance} mi)` };
