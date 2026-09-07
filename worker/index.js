@@ -55,13 +55,18 @@ export default {
   }
 };
 
-const VERSION = "3.9.7";
-const BUILD = "v3.9.8-broader-org-discovery";
+const VERSION = "3.9.8";
+const BUILD = "v3.9.9-discovery-efficiency";
 const SEARCH_LIMIT = 10;
 const ORG_DISCOVERY_QUERY_LIMIT = 14;
 const ORG_VALIDATION_LIMIT = 18;
 const VENUE_DISCOVERY_QUERY_LIMIT = 2;
 const VENUE_VALIDATION_LIMIT = 2;
+const SAFE_FETCH_LIMIT = 44;
+const EVENT_FETCH_LIMIT = 8;
+const USA_DISCOVERY_ANCHOR_LIMIT = 6;
+const USA_DISCOVERY_QUERY_LIMIT = 5;
+const JOB_WEB_VALIDATION_LIMIT = 1;
 const PAGE_LIMIT = 72;
 
 // Verified regional organizations/venues used as discovery anchors. These are organization seeds,
@@ -80,6 +85,8 @@ const BUILTIN_EVENT_SOURCES = [
 const DANCE_RE = /\bdance\b|dancing|ballroom|ballet|tap dance|jazz dance|dance studio|dance academy/i;
 const ORG_DANCE_RE = /(?:dance studio|dance academy|dance school|dance company|dance troupe|ballroom studio|ballet school|ballet academy|tap dance studio|jazz dance studio|dance club)/i;
 const JUNK_HOST_RE = /(?:facebook|instagram|linkedin|youtube|tiktok|pinterest|x\.com|twitter|wikipedia|yelp|tripadvisor|google|googleusercontent|googleapis|classroom|drive|accounts|menards|usps|17track|fedex)\./i;
+const LOW_VALUE_HOST_RE = /(?:britannica\.com|worldhistory\.org|merriam-webster\.com|almanac\.com|petmd\.com|a-z-animals\.com|newsbreak\.com|ground\.news|raynetoday\.com|restaurantji\.com|tvtv\.us|weather\.com|history\.com|pacnyc\.org|centurycommunities\.com|centurymartialarts\.com|centuryhouse\.biz)$/i;
+const LOW_VALUE_PATH_RE = /\/(?:dictionary|article|articles|news|weather|recipes?|podcasts?|restaurant-reviews?)\b/i;
 const FOREIGN_GOV_HOST_RE = /(?:^|\.)(?:gov|gouv|government|gc|ac)\.(?:co|uk|au|nz|ca|in|pk|bd|za|ng|ke|br|mx|fr|de|es|it|nl|be|ch|at|pl|se|no|dk|fi|jp|kr|sg|my|ph|id|th|vn)$/i;
 const ARTICLE_RE = /\b(?:news|newspaper|journalism|press release|obituary|podcast|radio|weather|scoreboard|politics|election|recipe|restaurant review|blog post)\b/i;
 const AMISH_RE = /\bamish\b|\bamish[- ]owned\b|\bamish[- ]run\b/i;
@@ -213,7 +220,7 @@ function buildEventQueries(org, interests, city, state) {
 }
 
 async function discover(interests, city, state, radius, env) {
-  const budget = { used: 0, limit: Number(env?.DISCOVERY_FETCH_LIMIT || 72) };
+  const budget = { used: 0, limit: Math.min(SAFE_FETCH_LIMIT, Number(env?.DISCOVERY_FETCH_LIMIT || 72)) };
   const diagnostics = [], venueCandidates = [];
   // Put trusted local seeds first so generic search-engine articles cannot consume the validation budget.
   const orgCandidates = [...BUILTIN_DISCOVERY_SEEDS, ...listEnv(env, "GROUP_SEEDS"), ...listEnv(env, "DISCOVERY_SEEDS")]
@@ -230,7 +237,7 @@ async function discover(interests, city, state, radius, env) {
     }
   }
 
-  const uniqueOrgUrls = dedupeCandidateUrls(orgCandidates).slice(0, ORG_VALIDATION_LIMIT);
+  const uniqueOrgUrls = prioritizeCandidateUrls(orgCandidates).slice(0, ORG_VALIDATION_LIMIT);
   const organizations = [];
   for (const c of uniqueOrgUrls) {
     const r = await fetchText(c.url, {}, budget);
@@ -259,7 +266,7 @@ async function discover(interests, city, state, radius, env) {
     for (const u of r.urls) if (acceptDiscoveryUrl(u, state)) venueCandidates.push({ url: u, query });
   }
   const venues = [];
-  for (const c of dedupeCandidateUrls(venueCandidates).slice(0, VENUE_VALIDATION_LIMIT)) {
+  for (const c of prioritizeCandidateUrls(venueCandidates).slice(0, VENUE_VALIDATION_LIMIT)) {
     const r = await fetchText(c.url, {}, budget);
     const d = { stage: "venue-validation", url: c.url, query: c.query, ok: r.ok, status: r.status, accepted: 0, rejected: null };
     if (!r.ok) { d.rejected = r.error || `HTTP ${r.status}`; diagnostics.push(d); continue; }
@@ -274,7 +281,7 @@ async function discover(interests, city, state, radius, env) {
   // Broader organization discovery uses the saved venue budget. Keep the total
   // organization/venue pass at roughly 36 calls and leave headroom for events under
   // Cloudflare's observed subrequest ceiling.
-  const eventBudget = { used: 0, limit: Math.min(10, Math.max(0, budget.limit - budget.used)) };
+  const eventBudget = { used: 0, limit: Math.min(EVENT_FETCH_LIMIT, Math.max(0, budget.limit - budget.used)) };
   const events = [];
   const trustedEventSources = [...BUILTIN_EVENT_SOURCES, ...listEnv(env, "EVENT_SOURCES").map(url => ({ url, name: "configured event source" }))];
   for (const source of trustedEventSources) {
@@ -342,6 +349,7 @@ function acceptDiscoveryUrl(u, state) {
   try {
     const x = new URL(u);
     if (JUNK_HOST_RE.test(x.hostname)) return false;
+    if (LOW_VALUE_HOST_RE.test(x.hostname) || LOW_VALUE_PATH_RE.test(x.pathname)) return false;
     if (isObviousOutOfState(x.href, state)) return false;
     return true;
   } catch { return false; }
@@ -353,7 +361,9 @@ function isObviousOutOfState(u, state) {
   const ohio = /\b(?:ohio|oh|trumbull|warren|northeast ohio|geauga|portage|ashtabula|mahoning|columbiana|summit|lake|cuyahoga)\b/.test(t);
   return outside && !ohio;
 }
+function discoveryCandidateScore(c) { const t = norm(c?.url || ""); let s = c?.trusted ? 1000 : 0; if (/\b(?:ohio|oh|trumbull|warren|northeast ohio|geauga|portage|ashtabula|mahoning|columbiana|summit|lake|cuyahoga)\b/.test(t)) s += 40; if (/\b(?:association|society|museum|guild|club|chapter|shire|sca|blacksmith|beekeep|reenact|history|heritage|preservation|nature|conservation)\b/.test(t)) s += 20; return s; }
 function dedupeCandidateUrls(arr) { const m = new Map(); for (const x of arr) if (!m.has(urlKey(x.url))) m.set(urlKey(x.url), x); return [...m.values()]; }
+function prioritizeCandidateUrls(arr) { return dedupeCandidateUrls(arr).sort((a, b) => discoveryCandidateScore(b) - discoveryCandidateScore(a)); }
 function dedupeOrganizations(arr) { return dedupeBy(arr, x => key(x.name, x.url)).sort((a, b) => (b.confidence - a.confidence) || (b.score - a.score)); }
 function dedupeBy(arr, fn) { const m = new Map(); for (const x of arr) { const k = fn(x); if (!k || m.has(k)) continue; m.set(k, x); } return [...m.values()]; }
 
@@ -597,8 +607,8 @@ async function discoverJobs(interests, city, state, radius, partTime, env) {
 
   // USAJOBS uses broad regional anchors for discovery. Its Radius is deliberately not the acceptance rule:
   // every result is validated against the user's home + requested radius using the Worker's own geography engine.
-  const usaAnchors = buildUSADiscoveryAnchors(city, state);
-  const usaQueries = buildUSAQueries(interests);
+  const usaAnchors = buildUSADiscoveryAnchors(city, state).slice(0, USA_DISCOVERY_ANCHOR_LIMIT);
+  const usaQueries = buildUSAQueries(interests).slice(0, USA_DISCOVERY_QUERY_LIMIT);
   const seenUSA = new Set();
   for (const anchor of usaAnchors) {
     const anchorStats = { anchor, requests: 0, http200: 0, discovered: 0, accepted: 0, rejectedDistance: 0, rejectedUnknownDistance: 0, rejectedFilter: 0, duplicate: 0 };
@@ -673,7 +683,7 @@ async function discoverJobs(interests, city, state, radius, partTime, env) {
     if (budget.used >= budget.limit) break;
     const r = await searchWeb(query, env, budget);
     diagnostics.push({ stage: "job-search", query, ok: r.ok, status: r.status, parser: r.parser || null, candidates: r.urls.length, milliseconds: r.milliseconds, bytes: r.bytes, error: r.ok ? null : r.error });
-    for (const u of r.urls.slice(0, 5)) {
+    for (const u of r.urls.slice(0, JOB_WEB_VALIDATION_LIMIT)) {
       if (budget.used >= budget.limit) break;
       if (!acceptDiscoveryUrl(u, state) || CAREER_RE.test(u)) continue;
       const pr = await fetchText(u, {}, budget);
@@ -699,13 +709,17 @@ function buildUSADiscoveryAnchors(city, state) {
     { label: "Warren", city: "Warren", state: "OH" },
     { label: "Youngstown", city: "Youngstown", state: "OH" },
     { label: "Ravenna", city: "Ravenna", state: "OH" },
-    { label: "Ashtabula", city: "Ashtabula", state: "OH" },
     { label: "Akron", city: "Akron", state: "OH" },
-    { label: "Canton", city: "Canton", state: "OH" },
-    { label: "Cleveland", city: "Cleveland", state: "OH" }
+    { label: "Ashtabula", city: "Ashtabula", state: "OH" }
   ];
 }
-function buildJobQueries(interests, city, state) { const base = interestBase(interests).slice(0, 6), p = `"${city}" ${state}`; return [...new Set(base.map(x => `"${x}" ${p} (jobs OR careers OR employment OR hiring) -dance`))].slice(0, 6); }
+function buildJobQueries(interests, city, state) {
+  const p = `"${city}" ${state}`;
+  const broad = ["maintenance facilities technician laborer", "welding fabrication mechanic equipment", "warehouse material handling delivery transportation", "parks grounds recreation natural resources", "museum historic preservation library", "custodial facilities building maintenance"];
+  const specific = interests.slice(0, 4).map(x => clean(x)).filter(Boolean);
+  const base = interests.length ? [...specific, ...broad.slice(0, 6 - specific.length)] : broad;
+  return [...new Set(base.map(x => `"${x}" ${p} (jobs OR careers OR employment OR hiring) -dance`))].slice(0, 6);
+}
 function buildUSAQueries(interests) {
   // Keep the federal discovery pass broad but bounded. Interest-specific web/job discovery
   // remains available elsewhere; adding those interests to every USAJOBS anchor multiplied
