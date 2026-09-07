@@ -1,6 +1,7 @@
 name = "opportunity-finder-v2"
 main = "worker/index.js"
 compatibility_date = "2026-09-07"
+# 3.9.3 validated worker deployment trigger
 
 [assets]
 directory = "./public"
