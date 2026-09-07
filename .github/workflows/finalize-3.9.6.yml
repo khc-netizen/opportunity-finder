@@ -17,7 +17,7 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-      - name: Repair geographic matching
+      - name: Validate final worker and force deployment touch
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -59,28 +59,24 @@ jobs:
           }
           '''
           s = s[:gs] + geo_fn + s[ge:]
-          s = s.replace('const BUILD = "v3.9.6-neo-rls-geographic-validation";', 'const BUILD = "v3.9.6-neo-rls-geographic-validation-final";', 1)
+          s = s.replace('const BUILD = "v3.9.6-neo-rls-geographic-validation-final";', 'const BUILD = "v3.9.6-neo-rls-geographic-validation-final2";', 1)
           p.write_text(s)
           PY
           node --check worker/index.js
-      - name: Validate parser and live NEO-RLS source
-        run: |
           node --input-type=module <<'JS'
           import { parseNeoRlsJobs, estimateDistance } from './worker/index.js';
-          console.log('Distances', estimateDistance('Mesopotamia, OH','Warren, OH'), estimateDistance('Mesopotamia, OH','Garrettsville, OH'));
           if (estimateDistance('Mesopotamia, OH','Warren, OH') !== 18) throw new Error('Warren distance failed');
           if (estimateDistance('Mesopotamia, OH','Garrettsville, OH') !== 14) throw new Error('Garrettsville distance failed');
           const r = await fetch('https://www.neo-rls.org/view_job_postings.php');
-          const html = await r.text();
-          const jobs = parseNeoRlsJobs(html,'https://www.neo-rls.org/view_job_postings.php',['museum','artifact conservation','historic preservation','archaeology','bike mechanic','welding','fabrication','woodworking','artisan','crafts'],'Mesopotamia','OH',30,{source:'NEO-RLS',partTime:true});
-          console.log('NEO-RLS',r.status,html.length,'bytes',jobs.length,'jobs');
+          const jobs = parseNeoRlsJobs(await r.text(),'https://www.neo-rls.org/view_job_postings.php',['museum','artifact conservation','historic preservation','archaeology','bike mechanic','welding','fabrication','woodworking','artisan','crafts'],'Mesopotamia','OH',30,{source:'NEO-RLS',partTime:true});
+          console.log('Validated live NEO-RLS jobs:', jobs.length);
           for (const j of jobs) console.log(j.title,'|',j.location,'|',j.distanceMiles);
           if (jobs.length < 5) throw new Error('Expected at least 5 local part-time NEO-RLS jobs');
           JS
-      - name: Commit final worker
+      - name: Commit worker deployment touch
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add worker/index.js
-          git commit -m "Phase 3.9.6 final NEO-RLS geographic repair" || exit 0
+          git commit -m "Phase 3.9.6 force final Cloudflare worker deployment" || exit 0
           git push origin main
