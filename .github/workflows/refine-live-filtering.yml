@@ -1,0 +1,37 @@
+name: Refine live filtering
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[live-filter-refine]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch worker
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('worker/index.js')
+          s=p.read_text()
+          s=s.replace('const JOB_JUNK_HOST_RE = /(?:zillow\\.com|realtor\\.com|redfin\\.com|trulia\\.com|pinterest\\.com|wikipedia\\.org|newsbreak\\.com|merriam-webster\\.com)$/i;', 'const JOB_JUNK_HOST_RE = /(?:zillow\\.com|realtor\\.com|redfin\\.com|trulia\\.com|pinterest\\.com|wikipedia\\.org|newsbreak\\.com|merriam-webster\\.com|alamy\\.com|shutterstock\\.com|istockphoto\\.com|dreamstime\\.com)$/i;')
+          s=s.replace('const DISCOVERY_SIGNAL_RE = /\\b(?:association|society|museum|library|guild|club|chapter|shire|sca|blacksmith|blacksmiths|beekeep|beekeepers|reenact|history|historical|heritage|preservation|nature|conservation|arboretum|observatory|community|farm|homestead|park|volunteer)\\b/i;', 'const DISCOVERY_SIGNAL_RE = /\\b(?:association|society|museum|library|guild|club|chapter|shire|sca|blacksmith|blacksmiths|beekeep|beekeepers|reenact|history|historical|heritage|preservation|nature|conservation|arboretum|observatory|community|farm|homestead|park|volunteer|events?|calendar|meeting|workshop|program|festival|fair|lecture|tour|exhibit|class|jobs?|career|employment|hiring|position|apply|technician|welder|welding|fabricat|mechanic|warehouse|laborer|maintenance|delivery|transportation)\\b/i;')
+          s=s.replace('const BUILD = "v3.9.12-discovery-budget";', 'const BUILD = "v3.9.13-live-filter-refine";')
+          s=s.replace('acceptDiscoveryUrl(u, state) && DISCOVERY_SIGNAL_RE.test(norm(u))', 'acceptDiscoveryUrl(u, state) && (DISCOVERY_SIGNAL_RE.test(norm(u)) || DISCOVERY_SIGNAL_RE.test(norm(query)))')
+          s=s.replace('acceptDiscoveryUrl(u, state) && (DISCOVERY_SIGNAL_RE.test(norm(u)) || VENUE_RE.test(norm(u)))', 'acceptDiscoveryUrl(u, state) && (DISCOVERY_SIGNAL_RE.test(norm(u)) || DISCOVERY_SIGNAL_RE.test(norm(query)) || VENUE_RE.test(norm(u)) || VENUE_RE.test(norm(query)))')
+          s=s.replace('(!EVENT_RE.test(norm(u)) && !DISCOVERY_SIGNAL_RE.test(norm(u)))', '(!EVENT_RE.test(norm(u)) && !EVENT_RE.test(norm(query)) && !DISCOVERY_SIGNAL_RE.test(norm(u)) && !DISCOVERY_SIGNAL_RE.test(norm(query)))')
+          s=s.replace('const JOB_WEB_VALIDATION_LIMIT = 1;', 'const JOB_WEB_VALIDATION_LIMIT = 1;')
+          p.write_text(s)
+          PY
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add worker/index.js
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Refine live candidate filtering [live-filter-refine]"
+          git push
