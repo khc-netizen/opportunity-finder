@@ -831,5 +831,3 @@ async function diagnostics(env, requestPath) {
 
 export { parseOrganizationPage, parseEvents, parseJobs, parseNeoRlsJobs, geographicEvidence, estimateDistance, parseHomeLocation };
 // Cloudflare deployment verification touch — validated 3.9.5 source-specific parsers.
-
-// Final-filter restore checkpoint.
