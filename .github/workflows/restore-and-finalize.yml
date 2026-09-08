@@ -1,0 +1,43 @@
+name: Restore and finalize Worker
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  restore:
+    if: ${{ !contains(github.event.head_commit.message, '[restore-final]') && !contains(github.event.head_commit.message, 'Remove restore and finalize workflow') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore known-good Worker and apply final filters
+        run: |
+          git show b08c63de1e7d6295fdf0b3ef9f236e6643dede61:worker/index.js > worker/index.js
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('worker/index.js')
+          s = p.read_text()
+          s = s.replace('const ORG_VALIDATION_LIMIT = 12;', 'const ORG_VALIDATION_LIMIT = 10;')
+          s = s.replace('const JOB_JUNK_HOST_RE = /(?:zillow\\.com|realtor\\.com|redfin\\.com|trulia\\.com|pinterest\\.com|wikipedia\\.org|newsbreak\\.com|merriam-webster\\.com|alamy\\.com|shutterstock\\.com|istockphoto\\.com|dreamstime\\.com)$/i;', 'const JOB_JUNK_HOST_RE = /(?:zillow\\.com|realtor\\.com|redfin\\.com|trulia\\.com|pinterest\\.com|wikipedia\\.org|newsbreak\\.com|merriam-webster\\.com|alamy\\.com|shutterstock\\.com|istockphoto\\.com|dreamstime\\.com|smallbiztrends\\.com|theengineerspost\\.com|branchspot\\.com)$/i;')
+          old = 'if (!acceptDiscoveryUrl(u, state) || (!EVENT_RE.test(norm(u)) && !EVENT_RE.test(norm(query)) && !DISCOVERY_SIGNAL_RE.test(norm(u)) && !DISCOVERY_SIGNAL_RE.test(norm(query))) || eventBudget.used >= eventBudget.limit) continue;'
+          new = 'if (!acceptDiscoveryUrl(u, state) || (!EVENT_RE.test(norm(u)) && !DISCOVERY_SIGNAL_RE.test(norm(u)) && !sameHost(u, org.url)) || JOB_JUNK_HOST_RE.test(host(u)) || eventBudget.used >= eventBudget.limit) continue;'
+          if old not in s:
+              raise SystemExit('event candidate pattern not found')
+          s = s.replace(old, new)
+          marker = 'function trustedSeedName(url) {'
+          helper = 'function sameHost(a, b) { try { return host(a) === host(b); } catch { return false; } }\n'
+          if helper not in s:
+              s = s.replace(marker, helper + '\n' + marker)
+          s = s.replace('const BUILD = "v3.9.13-live-filter-refine";', 'const BUILD = "v3.9.14-final-filter";')
+          p.write_text(s)
+          PY
+      - name: Commit finalized Worker
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add worker/index.js
+          git commit -m "Restore and finalize Worker filtering [restore-final]"
+          git push
