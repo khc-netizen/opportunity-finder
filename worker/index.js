@@ -56,7 +56,7 @@ export default {
 };
 
 const VERSION = "3.9.8";
-const BUILD = "v3.9.12-discovery-budget";
+const BUILD = "v3.9.13-live-filter-refine";
 const SEARCH_LIMIT = 10;
 const ORG_DISCOVERY_QUERY_LIMIT = 8;
 const ORG_VALIDATION_LIMIT = 12;
@@ -87,7 +87,7 @@ const ORG_DANCE_RE = /(?:dance studio|dance academy|dance school|dance company|d
 const JUNK_HOST_RE = /(?:facebook|instagram|linkedin|youtube|tiktok|pinterest|x\.com|twitter|wikipedia|yelp|tripadvisor|google|googleusercontent|googleapis|classroom|drive|accounts|menards|usps|17track|fedex)\./i;
 const LOW_VALUE_HOST_RE = /(?:britannica\.com|worldhistory\.org|merriam-webster\.com|almanac\.com|petmd\.com|a-z-animals\.com|newsbreak\.com|ground\.news|raynetoday\.com|restaurantji\.com|tvtv\.us|weather\.com|history\.com|pacnyc\.org|centurycommunities\.com|centurymartialarts\.com|centuryhouse\.biz|zillow\.com|realtor\.com|redfin\.com|trulia\.com)$/i;
 const LOW_VALUE_PATH_RE = /\/(?:dictionary|article|articles|news|weather|recipes?|podcasts?|restaurant-reviews?)\b/i;
-const JOB_JUNK_HOST_RE = /(?:zillow\.com|realtor\.com|redfin\.com|trulia\.com|pinterest\.com|wikipedia\.org|newsbreak\.com|merriam-webster\.com)$/i;
+const JOB_JUNK_HOST_RE = /(?:zillow\.com|realtor\.com|redfin\.com|trulia\.com|pinterest\.com|wikipedia\.org|newsbreak\.com|merriam-webster\.com|alamy\.com|shutterstock\.com|istockphoto\.com|dreamstime\.com)$/i;
 const FOREIGN_GOV_HOST_RE = /(?:^|\.)(?:gov|gouv|government|gc|ac)\.(?:co|uk|au|nz|ca|in|pk|bd|za|ng|ke|br|mx|fr|de|es|it|nl|be|ch|at|pl|se|no|dk|fi|jp|kr|sg|my|ph|id|th|vn)$/i;
 const ARTICLE_RE = /\b(?:news|newspaper|journalism|press release|obituary|podcast|radio|weather|scoreboard|politics|election|recipe|restaurant review|blog post)\b/i;
 const AMISH_RE = /\bamish\b|\bamish[- ]owned\b|\bamish[- ]run\b/i;
@@ -97,7 +97,7 @@ const ORG_IDENTITY_RE = /(?:association|society|club|guild|chapter|council|leagu
 const VENUE_RE = /(?:museum|library|historic site|historical site|heritage center|heritage centre|park|nature center|nature centre|arboretum|botanical garden|fairgrounds|community center|community centre|cultural center|cultural centre|observatory|visitor center|visitor centre|hall|farm|homestead|mill|theater|theatre)/i;
 const EVENT_RE = /(?:event|calendar|meeting|workshop|program|programme|exhibit|exhibition|festival|fair|lecture|tour|open house|class|demo|demonstration|registration|tickets|admission|rsvp)/i;
 const LOCAL_REGION_RE = /\b(?:ohio|trumbull|warren|northeast ohio|geauga|portage|ashtabula|mahoning|columbiana|summit|lake|cuyahoga)\b/i;
-const DISCOVERY_SIGNAL_RE = /\b(?:association|society|museum|library|guild|club|chapter|shire|sca|blacksmith|blacksmiths|beekeep|beekeepers|reenact|history|historical|heritage|preservation|nature|conservation|arboretum|observatory|community|farm|homestead|park|volunteer)\b/i;
+const DISCOVERY_SIGNAL_RE = /\b(?:association|society|museum|library|guild|club|chapter|shire|sca|blacksmith|blacksmiths|beekeep|beekeepers|reenact|history|historical|heritage|preservation|nature|conservation|arboretum|observatory|community|farm|homestead|park|volunteer|events?|calendar|meeting|workshop|program|festival|fair|lecture|tour|exhibit|class|jobs?|career|employment|hiring|position|apply|technician|welder|welding|fabricat|mechanic|warehouse|laborer|maintenance|delivery|transportation)\b/i;
 const JOB_SIGNAL_RE = /\b(?:job|jobs|career|careers|employment|hiring|position|apply|work|technician|welder|welding|fabricat|mechanic|warehouse|laborer|parks|grounds|recreation|museum|archaeology|custod|maintenance|delivery|transportation)\b/i;
 
 function parseHomeLocation(value) {
@@ -237,7 +237,7 @@ async function discover(interests, city, state, radius, env) {
     const r = await searchWeb(query, env, budget);
     diagnostics.push({ stage: "organization-search", source: "search", query, ok: r.ok, status: r.status, parser: r.parser || null, candidates: r.urls.length, milliseconds: r.milliseconds, bytes: r.bytes, error: r.ok ? null : r.error });
     for (const u of r.urls) {
-      if (acceptDiscoveryUrl(u, state) && DISCOVERY_SIGNAL_RE.test(norm(u))) orgCandidates.push({ url: u, query });
+      if (acceptDiscoveryUrl(u, state) && (DISCOVERY_SIGNAL_RE.test(norm(u)) || DISCOVERY_SIGNAL_RE.test(norm(query)))) orgCandidates.push({ url: u, query });
     }
   }
 
@@ -307,7 +307,7 @@ async function discover(interests, city, state, radius, env) {
       const r = await searchWeb(query, env, eventBudget);
       diagnostics.push({ stage: "event-search", organization: org.name, query, ok: r.ok, status: r.status, candidates: r.urls.length, milliseconds: r.milliseconds, bytes: r.bytes, error: r.ok ? null : r.error });
       for (const u of r.urls.slice(0, 4)) {
-        if (!acceptDiscoveryUrl(u, state) || (!EVENT_RE.test(norm(u)) && !DISCOVERY_SIGNAL_RE.test(norm(u))) || eventBudget.used >= eventBudget.limit) continue;
+        if (!acceptDiscoveryUrl(u, state) || (!EVENT_RE.test(norm(u)) && !EVENT_RE.test(norm(query)) && !DISCOVERY_SIGNAL_RE.test(norm(u)) && !DISCOVERY_SIGNAL_RE.test(norm(query))) || eventBudget.used >= eventBudget.limit) continue;
         const pr = await fetchText(u, {}, eventBudget);
         const d = { stage: "event-validation", organization: org.name, url: u, ok: pr.ok, status: pr.status, accepted: 0, rejected: null };
         if (!pr.ok) { d.rejected = pr.error || `HTTP ${pr.status}`; diagnostics.push(d); continue; }
