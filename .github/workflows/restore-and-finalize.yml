@@ -13,6 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Restore known-good Worker and apply final filters
         run: |
           git show b08c63de1e7d6295fdf0b3ef9f236e6643dede61:worker/index.js > worker/index.js
