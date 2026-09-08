@@ -56,10 +56,10 @@ export default {
 };
 
 const VERSION = "3.9.8";
-const BUILD = "v3.9.13-live-filter-refine";
+const BUILD = "v3.9.14-final-filter";
 const SEARCH_LIMIT = 10;
 const ORG_DISCOVERY_QUERY_LIMIT = 8;
-const ORG_VALIDATION_LIMIT = 12;
+const ORG_VALIDATION_LIMIT = 10;
 const VENUE_DISCOVERY_QUERY_LIMIT = 2;
 const VENUE_VALIDATION_LIMIT = 2;
 const SAFE_FETCH_LIMIT = 44;
@@ -87,7 +87,7 @@ const ORG_DANCE_RE = /(?:dance studio|dance academy|dance school|dance company|d
 const JUNK_HOST_RE = /(?:facebook|instagram|linkedin|youtube|tiktok|pinterest|x\.com|twitter|wikipedia|yelp|tripadvisor|google|googleusercontent|googleapis|classroom|drive|accounts|menards|usps|17track|fedex)\./i;
 const LOW_VALUE_HOST_RE = /(?:britannica\.com|worldhistory\.org|merriam-webster\.com|almanac\.com|petmd\.com|a-z-animals\.com|newsbreak\.com|ground\.news|raynetoday\.com|restaurantji\.com|tvtv\.us|weather\.com|history\.com|pacnyc\.org|centurycommunities\.com|centurymartialarts\.com|centuryhouse\.biz|zillow\.com|realtor\.com|redfin\.com|trulia\.com)$/i;
 const LOW_VALUE_PATH_RE = /\/(?:dictionary|article|articles|news|weather|recipes?|podcasts?|restaurant-reviews?)\b/i;
-const JOB_JUNK_HOST_RE = /(?:zillow\.com|realtor\.com|redfin\.com|trulia\.com|pinterest\.com|wikipedia\.org|newsbreak\.com|merriam-webster\.com|alamy\.com|shutterstock\.com|istockphoto\.com|dreamstime\.com)$/i;
+const JOB_JUNK_HOST_RE = /(?:zillow\.com|realtor\.com|redfin\.com|trulia\.com|pinterest\.com|wikipedia\.org|newsbreak\.com|merriam-webster\.com|alamy\.com|shutterstock\.com|istockphoto\.com|dreamstime\.com|smallbiztrends\.com|theengineerspost\.com|branchspot\.com)$/i;
 const FOREIGN_GOV_HOST_RE = /(?:^|\.)(?:gov|gouv|government|gc|ac)\.(?:co|uk|au|nz|ca|in|pk|bd|za|ng|ke|br|mx|fr|de|es|it|nl|be|ch|at|pl|se|no|dk|fi|jp|kr|sg|my|ph|id|th|vn)$/i;
 const ARTICLE_RE = /\b(?:news|newspaper|journalism|press release|obituary|podcast|radio|weather|scoreboard|politics|election|recipe|restaurant review|blog post)\b/i;
 const AMISH_RE = /\bamish\b|\bamish[- ]owned\b|\bamish[- ]run\b/i;
@@ -307,7 +307,7 @@ async function discover(interests, city, state, radius, env) {
       const r = await searchWeb(query, env, eventBudget);
       diagnostics.push({ stage: "event-search", organization: org.name, query, ok: r.ok, status: r.status, candidates: r.urls.length, milliseconds: r.milliseconds, bytes: r.bytes, error: r.ok ? null : r.error });
       for (const u of r.urls.slice(0, 4)) {
-        if (!acceptDiscoveryUrl(u, state) || (!EVENT_RE.test(norm(u)) && !EVENT_RE.test(norm(query)) && !DISCOVERY_SIGNAL_RE.test(norm(u)) && !DISCOVERY_SIGNAL_RE.test(norm(query))) || eventBudget.used >= eventBudget.limit) continue;
+        if (!acceptDiscoveryUrl(u, state) || (!EVENT_RE.test(norm(u)) && !DISCOVERY_SIGNAL_RE.test(norm(u)) && !sameHost(u, org.url)) || JOB_JUNK_HOST_RE.test(host(u)) || eventBudget.used >= eventBudget.limit) continue;
         const pr = await fetchText(u, {}, eventBudget);
         const d = { stage: "event-validation", organization: org.name, url: u, ok: pr.ok, status: pr.status, accepted: 0, rejected: null };
         if (!pr.ok) { d.rejected = pr.error || `HTTP ${pr.status}`; diagnostics.push(d); continue; }
@@ -338,6 +338,8 @@ async function discover(interests, city, state, radius, env) {
     ]
   };
 }
+
+function sameHost(a, b) { try { return host(a) === host(b); } catch { return false; } }
 
 function trustedSeedName(url) {
   const h = String(url || "").toLowerCase();
