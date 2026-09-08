@@ -34,6 +34,8 @@ jobs:
           if helper not in s:
               s = s.replace(marker, helper + '\n' + marker)
           s = s.replace('const BUILD = "v3.9.13-live-filter-refine";', 'const BUILD = "v3.9.14-final-filter";')
+          # Force a commit even if the restored source already matches the current tree.
+          s += '\n// Final-filter restore checkpoint.\n'
           p.write_text(s)
           PY
       - name: Commit finalized Worker
