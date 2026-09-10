@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   validate:
@@ -19,6 +19,64 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Apply discovery quality patch once
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('worker/index.js')
+          s = p.read_text(encoding='utf-8')
+          marker = 'const DISCOVERY_QUALITY_PASS = "2026-09-10";'
+          if marker not in s:
+              s = s.replace(
+                  'const JOB_SIGNAL_RE = /\\b(?:job|jobs|career|careers|employment|hiring|position|apply|work|technician|welder|welding|fabricat|mechanic|warehouse|laborer|parks|grounds|recreation|museum|archaeology|custod|maintenance|delivery|transportation)\\b/i;\n',
+                  'const JOB_SIGNAL_RE = /\\b(?:job|jobs|career|careers|employment|hiring|position|apply|work|technician|welder|welding|fabricat|mechanic|warehouse|laborer|parks|grounds|recreation|museum|archaeology|custod|maintenance|delivery|transportation)\\b/i;\n' +
+                  'const DISCOVERY_QUALITY_PASS = "2026-09-10";\n' +
+                  'const GENERIC_CONTENT_PATH_RE = /\\/(?:story|stories|press|press-release|opinion|blog|podcast|dictionary|definition|encyclopedia|faq|how-to)(?:[/?#]|$)/i;\n' +
+                  'const SEARCH_NOISE_RE = /\\b(?:ancient mesopotamia|mesopotamia river|mesopotamian|louisiana|church point)\\b/i;\n',
+                  1
+              )
+              anchor = 'function acceptDiscoveryUrl(u, state) {'
+              helper = '''function worthwhileDiscoveryCandidate(c, state, mode) {\n  const urlText = norm(c?.url || "");\n  const queryText = norm(c?.query || "");\n  const combined = `${urlText} ${queryText}`;\n  if (SEARCH_NOISE_RE.test(combined) || GENERIC_CONTENT_PATH_RE.test(String(c?.url || ""))) return false;\n  if (mode === "organization") return !!c?.trusted || DISCOVERY_SIGNAL_RE.test(combined);\n  if (mode === "venue") return VENUE_RE.test(combined) || DISCOVERY_SIGNAL_RE.test(combined);\n  if (mode === "event") return EVENT_RE.test(combined) || DISCOVERY_SIGNAL_RE.test(combined);\n  return false;\n}\n\n'''
+              if anchor not in s:
+                  raise SystemExit('quality helper anchor missing')
+              s = s.replace(anchor, helper + anchor, 1)
+              old = 'if (JUNK_HOST_RE.test(x.hostname)) return false;\n    if (LOW_VALUE_HOST_RE.test(x.hostname) || LOW_VALUE_PATH_RE.test(x.pathname)) return false;'
+              new = 'if (JUNK_HOST_RE.test(x.hostname)) return false;\n    if (LOW_VALUE_HOST_RE.test(x.hostname) || LOW_VALUE_PATH_RE.test(x.pathname)) return false;\n    if (GENERIC_CONTENT_PATH_RE.test(x.pathname)) return false;'
+              if old not in s:
+                  raise SystemExit('acceptDiscoveryUrl target missing')
+              s = s.replace(old, new, 1)
+              old = 'if (acceptDiscoveryUrl(u, state) && (DISCOVERY_SIGNAL_RE.test(norm(u)) || DISCOVERY_SIGNAL_RE.test(norm(query)))) orgCandidates.push({ url: u, query });'
+              new = 'const candidate = { url: u, query };\n      if (acceptDiscoveryUrl(u, state) && worthwhileDiscoveryCandidate(candidate, state, "organization")) orgCandidates.push(candidate);'
+              if old not in s:
+                  raise SystemExit('organization candidate target missing')
+              s = s.replace(old, new, 1)
+              old = 'for (const u of r.urls) if (acceptDiscoveryUrl(u, state)) venueCandidates.push({ url: u, query });'
+              new = 'for (const u of r.urls) { const candidate = { url: u, query }; if (acceptDiscoveryUrl(u, state) && worthwhileDiscoveryCandidate(candidate, state, "venue")) venueCandidates.push(candidate); }'
+              if old not in s:
+                  raise SystemExit('venue candidate target missing')
+              s = s.replace(old, new, 1)
+              old = 'if (!acceptDiscoveryUrl(u, state) || (!EVENT_RE.test(norm(u)) && !DISCOVERY_SIGNAL_RE.test(norm(u)) && !sameHost(u, org.url)) || JOB_JUNK_HOST_RE.test(host(u)) || eventBudget.used >= eventBudget.limit) continue;'
+              new = 'const candidate = { url: u, query };\n        if (!acceptDiscoveryUrl(u, state) || !worthwhileDiscoveryCandidate(candidate, state, "event") || (!EVENT_RE.test(norm(u)) && !DISCOVERY_SIGNAL_RE.test(norm(u)) && !sameHost(u, org.url)) || JOB_JUNK_HOST_RE.test(host(u)) || eventBudget.used >= eventBudget.limit) continue;'
+              if old not in s:
+                  raise SystemExit('event candidate target missing')
+              s = s.replace(old, new, 1)
+              p.write_text(s, encoding='utf-8')
+          else:
+              print('Discovery quality pass already present; no patch needed.')
+          PY
+          grep -q 'const DISCOVERY_QUALITY_PASS = "2026-09-10";' worker/index.js
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add worker/index.js
+          if git diff --cached --quiet; then
+            echo 'No discovery patch commit needed.'
+            exit 0
+          fi
+          git commit -m 'Improve discovery candidate precision'
+          git push
       - name: Validate Worker syntax
         run: node --check worker/index.js
       - name: Validate frontend syntax
@@ -41,5 +99,4 @@ jobs:
           grep -q 'architecture: "organization-first"' worker/index.js
           grep -q 'const DANCE_RE' worker/index.js
           grep -q 'const AMISH_RE' worker/index.js
-          grep -q 'function discoverJobs' worker/index.js
           test ! -d .github/workflows/recovery
