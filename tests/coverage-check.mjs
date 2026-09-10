@@ -11,6 +11,11 @@ assert.match(coverage, /JOB_LENS/);
 assert.match(coverage, /adaptiveLens/);
 assert.match(coverage, /uniqueItems/);
 assert.match(coverage, /baseWorker\.fetch\(request, env, ctx\)/);
+assert.match(coverage, /DIAGNOSTIC_SEEDS/);
+assert.match(coverage, /seedCoverage/);
+assert.match(coverage, /organicResults/);
+assert.match(coverage, /discoveryHealth/);
+assert.match(coverage, /recovery/);
 assert.match(wrangler, /main = \"worker\/coverage\.js\"/);
 
-console.log("Discovery coverage checks passed.");
+console.log("Discovery coverage and seed diagnostics checks passed.");
