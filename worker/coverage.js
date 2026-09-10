@@ -1,9 +1,9 @@
 import baseWorker from './index.js';
 import { organicDiscover } from './organic.js';
 
-const RELEASE = '3.11.4';
-const RELEASE_BUILD = 'v3.11.4-live-test';
-const RELEASE_FINGERPRINT = 'live-test-2026-09-10';
+const RELEASE = '3.11.5';
+const RELEASE_BUILD = 'v3.11.5-search-url-fix';
+const RELEASE_FINGERPRINT = 'search-url-fix-2026-09-10';
 const GROUP_LENS = ['community organizations Warren Ohio','historical societies Cortland Ohio','museums Garrettsville Ohio','nature conservation Middlefield Ohio','traditional crafts Burton Ohio','archaeology Chardon Ohio','volunteer groups Kent Ohio','gardening clubs Ravenna Ohio'];
 const JOB_LENS = ['maintenance','welding fabrication','mechanic technician','parks recreation','museum archaeology','warehouse material handling','grounds laborer','facility technician'];
 const EVENT_LENS = ['community events Warren Ohio','history events Cortland Ohio','museum programs Garrettsville Ohio','nature events Middlefield Ohio','craft workshops Burton Ohio','archaeology events Chardon Ohio','volunteer events Kent Ohio','gardening events Ravenna Ohio'];
