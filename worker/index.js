@@ -358,20 +358,15 @@ function trustedSeedName(url) {
   try { return humanizeHostname(new URL(url).hostname).replace(/\b\w/g, c => c.toUpperCase()); } catch { return "Trusted local organization"; }
 }
 function worthwhileJobCandidate(c, state) {
-  const urlText = norm(c?.url || "");
-  const queryText = norm(c?.query || "");
-  const combined = `${urlText} ${queryText}`;
-  if (SEARCH_NOISE_RE.test(combined) || GENERIC_CONTENT_PATH_RE.test(String(c?.url || ""))) return false;
-  if (JOB_REFERENCE_RE.test(combined)) return false;
-  if (JOB_JUNK_HOST_RE.test(host(c?.url || ""))) return false;
-  if (!acceptDiscoveryUrl(c?.url || "", state)) return false;
-  const urlCareer = CAREER_RE.test(urlText);
-  const contentSignal = JOB_CONTENT_RE.test(combined);
-  const jobSignal = JOB_SIGNAL_RE.test(combined);
-  if (urlCareer || contentSignal) return true;
-  // A search result with only a generic occupational term is not worth an expensive fetch.
-  // Permit an employer-looking homepage only when the URL/query carries a strong job signal.
-  return jobSignal && /(?:jobs?|careers?|employment|hiring|work|team|apply|position|vacanc|opportunit)/i.test(combined);
+  const rawUrl = String(c?.url || "");
+  const urlText = norm(rawUrl);
+  if (SEARCH_NOISE_RE.test(urlText) || GENERIC_CONTENT_PATH_RE.test(rawUrl)) return false;
+  if (JOB_REFERENCE_RE.test(urlText)) return false;
+  if (JOB_JUNK_HOST_RE.test(host(rawUrl))) return false;
+  if (!acceptDiscoveryUrl(rawUrl, state)) return false;
+  // Search query terms are deliberately ignored here because all job queries contain job words.
+  const pathSignal = /(?:\bjobs?\b|\bcareers?\b|\bemployment\b|\bhiring\b|\brecruit(?:ment|ing)?\b|\bapply\b|\bapplication\b|\bopenings?\b|\bvacanc(?:y|ies)\b|\bpositions?\b|\bwork[-_ ]?with[-_ ]?(?:us|me)\b|\bjoin[-_ ]?(?:our|the)[-_ ]?team\b|\bopportunit(?:y|ies)\b)/i.test(urlText);
+  return CAREER_RE.test(urlText) || pathSignal;
 }
 
 function worthwhileDiscoveryCandidate(c, state, mode) {
