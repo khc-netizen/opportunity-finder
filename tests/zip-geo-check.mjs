@@ -15,4 +15,19 @@ assert.ok(eligibleZips(15).some(x => x.zip === "44410"));
 assert.ok(!eligibleZips(15).some(x => x.zip === "44481"));
 assert.ok(!eligibleZips(30).some(x => x.zip === "44240"));
 
-console.log("Verified ZIP geography checks passed.");
+// Independent-radius regression checks: one canonical ZIP map, three separate eligibility lenses.
+const groups50 = eligibleZips(50).map(x => x.zip);
+const events30 = eligibleZips(30).map(x => x.zip);
+const jobs15 = eligibleZips(15).map(x => x.zip);
+assert.ok(groups50.includes("44240"), "50-mile groups lens should include Kent");
+assert.ok(!events30.includes("44240"), "30-mile events lens should exclude Kent");
+assert.ok(!jobs15.includes("44240"), "15-mile jobs lens should exclude Kent");
+assert.ok(jobs15.every(zip => events30.includes(zip)), "15-mile job pool must be contained within 30-mile event pool");
+assert.ok(events30.every(zip => groups50.includes(zip)), "30-mile event pool must be contained within 50-mile group pool");
+
+// Search-result evidence regression checks.
+assert.equal(passesHardZipGate("local employer, Cortland OH 44410", 15), true);
+assert.equal(passesHardZipGate("warehouse job, Dunn NC 28334", 15), false);
+assert.equal(passesHardZipGate("Pennsylvania job 15201", 50), false);
+
+console.log("Verified ZIP geography, independent radius, and prefetch gate checks passed.");
