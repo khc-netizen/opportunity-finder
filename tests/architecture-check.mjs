@@ -5,7 +5,7 @@ const worker = readFileSync("worker/index.js", "utf8");
 const frontend = readFileSync("public/index.html", "utf8");
 
 // Backend architecture invariants.
-assert.match(worker, /architecture:\s*"organization-first"/);
+assert.match(worker, /architecture:\s*['\"]organization-first['\"]/);
 assert.match(worker, /const DANCE_RE/);
 assert.match(worker, /const AMISH_RE/);
 assert.match(worker, /async function discover\(/);
