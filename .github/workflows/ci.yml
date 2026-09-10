@@ -21,6 +21,8 @@ jobs:
           node-version: 22
       - name: Validate Worker syntax
         run: node --check worker/index.js
+      - name: Validate coverage layer syntax
+        run: node --check worker/coverage.js
       - name: Validate frontend syntax
         shell: bash
         run: |
@@ -44,3 +46,5 @@ jobs:
           test ! -d .github/workflows/recovery
       - name: Run architecture regression checks
         run: node tests/architecture-check.mjs
+      - name: Run discovery coverage checks
+        run: node tests/coverage-check.mjs
