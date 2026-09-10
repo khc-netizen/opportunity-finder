@@ -1,62 +1,95 @@
 import baseWorker from './index.js';
+import { organicDiscover } from './organic.js';
 
-const RELEASE = '3.9.16';
-const RELEASE_BUILD = 'v3.9.16-seed-fallback';
-const RELEASE_FINGERPRINT = 'seed-fallback-2026-09-10';
-
-const GROUP_LENS = ['community organizations Warren Ohio','historical societies Cortland Ohio','museums Garrettsville Ohio','nature conservation Middlefield Ohio','traditional crafts Burton Ohio','archaeology Chardon Ohio','volunteer groups Kent Ohio','gardening clubs Ravenna Ohio'];
-const JOB_LENS = ['maintenance','welding fabrication','mechanic technician','parks recreation','museum archaeology','warehouse material handling','grounds laborer','facility technician'];
-const EVENT_LENS = ['community events Warren Ohio','history events Cortland Ohio','museum programs Garrettsville Ohio','nature events Middlefield Ohio','craft workshops Burton Ohio','archaeology events Chardon Ohio','volunteer events Kent Ohio','gardening events Ravenna Ohio'];
-const DIAGNOSTIC_SEEDS = [
-  { name: 'Trumbull County Beekeepers', url: 'https://www.trumbullbeekeepers.org/' },
-  { name: 'Western Reserve Artist Blacksmith Association', url: 'https://www.wraba.com/' },
-  { name: 'Century Village Museum', url: 'https://centuryvillagemuseum.org/' }
-];
+const RELEASE = '3.10.0';
+const RELEASE_BUILD = 'v3.10.0-organic-first';
+const RELEASE_FINGERPRINT = 'organic-first-2026-09-10';
 
 async function jsonResponse(response) { const text = await response.text(); try { return { response, data: JSON.parse(text) }; } catch { return { response, data: null }; } }
-function uniqueItems(items = []) { const seen = new Set(); return items.filter(item => { const key = `${String(item?.title || item?.name || '').toLowerCase()}|${String(item?.url || item?.link || '').toLowerCase()}`; if (!key || seen.has(key)) return false; seen.add(key); return true; }); }
-function withLens(request, lens) { const u = new URL(request.url); u.searchParams.set('interests', lens.join(',')); return new Request(u, request); }
-function seedMatch(item, seed) { const haystack = `${item?.title || item?.name || ''} ${item?.url || item?.link || ''}`.toLowerCase(); return haystack.includes(seed.name.toLowerCase()) || haystack.includes(seed.url.replace(/^https?:\/\//, '').replace(/\/$/, '').toLowerCase()); }
-function isSeed(item) { return DIAGNOSTIC_SEEDS.some(seed => seedMatch(item, seed)); }
-function organicItems(items = []) { return items.filter(item => !isSeed(item)); }
-function seedHealth(items = []) { const found = DIAGNOSTIC_SEEDS.map(seed => ({ ...seed, found: items.some(item => seedMatch(item, seed)) })); const organic = organicItems(items); return { expected: DIAGNOSTIC_SEEDS.length, found: found.filter(x => x.found).length, missing: found.filter(x => !x.found).map(x => x.name), seeds: found, totalResults: items.length, organicResults: organic.length, seedOnly: items.length > 0 && organic.length === 0 }; }
-function addRelease(data) { return { ...data, deployment: { version: RELEASE, build: RELEASE_BUILD, fingerprint: RELEASE_FINGERPRINT, entrypoint: 'worker/coverage.js' } }; }
-function seedAwareResult(data, field) { if (!data || !Array.isArray(data[field])) return data; const all = uniqueItems(data[field]); const organic = organicItems(all); const visible = organic.length ? organic : all; return { ...data, [field]: visible, items: field === 'groups' || field === 'events' ? visible : data.items, discoveryHealth: { ...(data.discoveryHealth || {}), organicResults: organic.length, totalResults: all.length, seedOnly: all.length > 0 && organic.length === 0, seedFallbackUsed: organic.length === 0 && all.length > 0 } }; }
+function requestParams(request) { const u = new URL(request.url); const interests = String(u.searchParams.get('interests') || '').split(',').map(x => x.trim()).filter(Boolean); const city = u.searchParams.get('city') || 'Mesopotamia'; const state = u.searchParams.get('state') || 'OH'; const radius = Number(u.searchParams.get('radius') || 75); return { interests, city, state, radius }; }
+function release(data) { return { ...data, deployment: { version: RELEASE, build: RELEASE_BUILD, fingerprint: RELEASE_FINGERPRINT, entrypoint: 'worker/coverage.js' } }; }
+function fallbackItem(item) { return { ...item, discoverySource: 'seed-fallback' }; }
 
-async function diagnosticHealth(request, env, ctx) {
-  const first = await jsonResponse(await baseWorker.fetch(request, env, ctx));
-  const groupsRequest = new Request(new URL('/groups' + new URL(request.url).search, request.url), request);
-  const firstGroups = await jsonResponse(await baseWorker.fetch(groupsRequest, env, ctx));
-  const firstItems = Array.isArray(firstGroups.data?.groups) ? firstGroups.data.groups : (Array.isArray(firstGroups.data?.items) ? firstGroups.data.items : []);
-  const health = seedHealth(firstItems);
-  const recovery = { attempted: false, reason: null, found: health.found, results: health.totalResults };
-  if (health.found < health.expected) {
-    recovery.attempted = true;
-    recovery.reason = 'one or more diagnostic seed organizations were not returned by the normal Groups discovery pass';
-    const recovered = await jsonResponse(await baseWorker.fetch(withLens(groupsRequest, DIAGNOSTIC_SEEDS.map(x => `"${x.name}"`)), env, ctx));
-    const recoveredItems = Array.isArray(recovered.data?.groups) ? recovered.data.groups : (Array.isArray(recovered.data?.items) ? recovered.data.items : []);
-    const recoveredHealth = seedHealth(recoveredItems);
-    recovery.found = recoveredHealth.found; recovery.results = recoveredHealth.totalResults; recovery.missing = recoveredHealth.missing; recovery.status = recoveredHealth.found === recoveredHealth.expected ? 'recovered' : 'failed';
-  } else recovery.status = 'not-needed';
-  const diagnostic = addRelease({ ...(first.data || {}), version: RELEASE, build: RELEASE_BUILD, discoveryHealth: { organicResults: health.organicResults, totalResults: health.totalResults, seedOnly: health.seedOnly, seedCoverage: `${health.found}/${health.expected}`, seedCoveragePass: health.found === health.expected, discoveryPass: health.organicResults > 0, recovery, error: health.organicResults === 0 ? 'No organic organizations were discovered independently of the diagnostic seed set.' : null } });
-  return new Response(JSON.stringify(diagnostic, null, 2), { status: first.response.status, headers: first.response.headers });
+async function jobsFor(request, env, ctx) {
+  const u = new URL(request.url); u.pathname = '/jobs';
+  return jsonResponse(await baseWorker.fetch(new Request(u, request), env, ctx));
 }
 
-async function adaptive(request, env, ctx, field, lens, minimum, maxPrimaryFetches = Infinity) {
-  const first = await jsonResponse(await baseWorker.fetch(request, env, ctx));
-  if (!first.data || !Array.isArray(first.data[field])) return first.response;
-  const firstProcessed = seedAwareResult(first.data, field);
-  const firstOrganic = organicItems(first.data[field]);
-  if (firstOrganic.length >= minimum) { const result = addRelease(firstProcessed); return new Response(JSON.stringify(result, null, 2), { status: first.response.status, headers: first.response.headers }); }
-  const primaryUsed = Number(first.data?.fetchBudget?.used ?? Infinity);
-  if (primaryUsed > maxPrimaryFetches) { const result = addRelease(firstProcessed); return new Response(JSON.stringify(result, null, 2), { status: first.response.status, headers: first.response.headers }); }
-  const second = await jsonResponse(await baseWorker.fetch(withLens(request, lens), env, ctx));
-  if (!second.data || !Array.isArray(second.data[field])) { const result = addRelease(firstProcessed); return new Response(JSON.stringify(result, null, 2), { status: first.response.status, headers: first.response.headers }); }
-  const mergedAll = uniqueItems([...first.data[field], ...second.data[field]]);
-  const mergedOrganic = organicItems(mergedAll);
-  const visible = mergedOrganic.length ? mergedOrganic : mergedAll;
-  const result = addRelease({ ...first.data, [field]: visible, items: field === 'groups' || field === 'events' ? visible : first.data.items, coverage: { ...(first.data.coverage || {}), adaptiveLens: true, lens, primaryCount: first.data[field].length, supplementalCount: second.data[field].length, mergedCount: mergedAll.length, organicCount: mergedOrganic.length, seedFallbackUsed: mergedOrganic.length === 0 && mergedAll.length > 0, primaryFetches: primaryUsed, supplementalFetches: second.data?.fetchBudget?.used ?? null } });
-  return new Response(JSON.stringify(result, null, 2), { status: first.response.status, headers: first.response.headers });
+async function discovery(request, env, ctx) {
+  const p = requestParams(request);
+  const organic = await organicDiscover(p.interests, p.city, p.state, p.radius);
+  const jobs = await jobsFor(request, env, ctx);
+  let groups = organic.groups || [];
+  let events = organic.events || [];
+  let seedFallbackUsed = false;
+  let fallbackDiagnostics = null;
+
+  if (!groups.length || !events.length) {
+    const base = await jsonResponse(await baseWorker.fetch(request, env, ctx));
+    if (base.data) {
+      if (!groups.length && Array.isArray(base.data.groups)) { groups = base.data.groups.map(fallbackItem); seedFallbackUsed = groups.length > 0; }
+      if (!events.length && Array.isArray(base.data.events)) { events = base.data.events.map(fallbackItem); seedFallbackUsed = seedFallbackUsed || events.length > 0; }
+      fallbackDiagnostics = base.data.diagnostics || base.data.coverage || null;
+    }
+  }
+
+  return release({
+    ok: true,
+    version: RELEASE,
+    build: RELEASE_BUILD,
+    architecture: 'organization-first / organic-first with explicit seed fallback',
+    groups,
+    events,
+    jobs: jobs.data?.jobs || [],
+    items: groups,
+    fetchBudget: { organic: organic.fetchBudget, jobs: jobs.data?.fetchBudget || null },
+    coverage: { ...(organic.coverage || {}), seedFallbackUsed, fallbackDiagnostics }
+  });
 }
 
-export default { async fetch(request, env, ctx) { const url = new URL(request.url); if (url.pathname === '/test') return diagnosticHealth(request, env, ctx); if (url.pathname === '/groups') return adaptive(request, env, ctx, 'groups', GROUP_LENS, 6, 22); if (url.pathname === '/events') return adaptive(request, env, ctx, 'events', EVENT_LENS, 8, 22); if (url.pathname === '/jobs') return baseWorker.fetch(request, env, ctx); if (url.pathname === '/discover') return baseWorker.fetch(request, env, ctx); return baseWorker.fetch(request, env, ctx); } };
+async function diagnostic(request, env, ctx) {
+  const p = requestParams(request);
+  const started = Date.now();
+  const organic = await organicDiscover(p.interests, p.city, p.state, p.radius);
+  const jobs = await jobsFor(request, env, ctx);
+  const seedFallback = !organic.groups.length || !organic.events.length;
+  const legacy = seedFallback ? await jsonResponse(await baseWorker.fetch(request, env, ctx)) : null;
+  return new Response(JSON.stringify(release({
+    ok: true,
+    diagnostic: true,
+    version: RELEASE,
+    build: RELEASE_BUILD,
+    worker: new URL(request.url).origin,
+    architecture: 'organization-first / organic-first with explicit seed fallback',
+    groups: {
+      stages: { organicSearchCandidates: organic.coverage?.candidateCount || 0, organicOrganizations: organic.groups.length, organicEventsFromOrganizations: organic.events.length },
+      fetchBudget: organic.fetchBudget,
+      tail: organic.diagnostics.slice(-12),
+      seedFallbackUsed: !organic.groups.length,
+      legacyFallbackAvailable: !!legacy?.data
+    },
+    events: {
+      stages: { organicOrganizations: organic.groups.length, organicEvents: organic.events.length },
+      fetchBudget: organic.fetchBudget,
+      tail: organic.diagnostics.slice(-12),
+      seedFallbackUsed: !organic.events.length,
+      legacyFallbackAvailable: !!legacy?.data
+    },
+    jobs: { counts: { jobs: Array.isArray(jobs.data?.jobs) ? jobs.data.jobs.length : 0 }, fetchBudget: jobs.data?.fetchBudget || null, tail: jobs.data?.diagnostics?.slice?.(-12) || [] },
+    discoveryHealth: { organicGroups: organic.groups.length, organicEvents: organic.events.length, organicCandidateCount: organic.coverage?.candidateCount || 0, seedFallbackUsed, fallbackActivated: !!legacy?.data, durationMs: Date.now() - started }
+  }, null, 2), { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' } });
+}
+
+export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    if (url.pathname === '/test') return diagnostic(request, env, ctx);
+    if (url.pathname === '/groups' || url.pathname === '/events' || url.pathname === '/discover') {
+      const result = await discovery(request, env, ctx);
+      if (url.pathname === '/groups') return new Response(JSON.stringify({ ...result, items: result.groups, events: undefined, jobs: undefined }, null, 2), { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' } });
+      if (url.pathname === '/events') return new Response(JSON.stringify({ ...result, items: result.events, groups: undefined, jobs: undefined, uniqueCount: result.events.length }, null, 2), { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' } });
+      return new Response(JSON.stringify(result, null, 2), { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' } });
+    }
+    return baseWorker.fetch(request, env, ctx);
+  }
+};
