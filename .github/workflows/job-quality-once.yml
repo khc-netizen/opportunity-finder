@@ -1,0 +1,50 @@
+name: Opportunity Finder Job Quality Patch
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Apply job discovery quality patch
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const path = "worker/index.js";
+            const current = await github.rest.repos.getContent({ owner, repo, path, ref: "main" });
+            const content = Buffer.from(current.data.content, "base64").toString("utf8");
+            let updated = content;
+            updated = updated.replace('const JOB_WEB_VALIDATION_LIMIT = 1;', 'const JOB_WEB_VALIDATION_LIMIT = 2;');
+            if (!updated.includes('function worthwhileJobCandidate(c, state)')) {
+              const marker = 'function worthwhileDiscoveryCandidate(c, state, mode) {';
+              const helper = `function worthwhileJobCandidate(c, state) {
+  const urlText = norm(c?.url || "");
+  const queryText = norm(c?.query || "");
+  const combined = \`${"${"}urlText} \${"${"}queryText}\`;
+  if (SEARCH_NOISE_RE.test(combined) || GENERIC_CONTENT_PATH_RE.test(String(c?.url || ""))) return false;
+  if (JOB_JUNK_HOST_RE.test(host(c?.url || ""))) return false;
+  if (!acceptDiscoveryUrl(c?.url || "", state)) return false;
+  return JOB_SIGNAL_RE.test(combined) || CAREER_RE.test(combined);
+}
+
+`;
+              if (!updated.includes(marker)) throw new Error("Discovery candidate helper marker not found");
+              updated = updated.replace(marker, helper + marker);
+            }
+            const oldGate = 'if (!acceptDiscoveryUrl(u, state) || JOB_JUNK_HOST_RE.test(host(u)) || !JOB_SIGNAL_RE.test(norm(u))) continue;';
+            const newGate = 'if (!worthwhileJobCandidate({ url: u, query }, state)) continue;';
+            if (updated.includes(oldGate)) updated = updated.replace(oldGate, newGate);
+            if (updated === content) core.setFailed("Job quality patch made no changes");
+            else await github.rest.repos.createOrUpdateFileContents({
+              owner, repo, path, branch: "main",
+              message: "Improve job candidate validation",
+              content: Buffer.from(updated, "utf8").toString("base64"),
+              sha: current.data.sha
+            });
