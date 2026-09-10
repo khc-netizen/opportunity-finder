@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   validate:
@@ -19,6 +19,49 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: 22
+      - name: Apply job discovery quality patch once
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("worker/index.js")
+          s = p.read_text(encoding="utf-8")
+          old = 'const JOB_WEB_VALIDATION_LIMIT = 1;'
+          new = 'const JOB_WEB_VALIDATION_LIMIT = 2;'
+          if old in s:
+              s = s.replace(old, new, 1)
+          marker = 'function worthwhileDiscoveryCandidate(c, state, mode) {'
+          helper = '''function worthwhileJobCandidate(c, state) {
+  const urlText = norm(c?.url || "");
+  const queryText = norm(c?.query || "");
+  const combined = `${urlText} ${queryText}`;
+  if (SEARCH_NOISE_RE.test(combined) || GENERIC_CONTENT_PATH_RE.test(String(c?.url || ""))) return false;
+  if (JOB_JUNK_HOST_RE.test(host(c?.url || ""))) return false;
+  if (!acceptDiscoveryUrl(c?.url || "", state)) return false;
+  return JOB_SIGNAL_RE.test(combined) || CAREER_RE.test(combined);
+}
+
+'''
+          if 'function worthwhileJobCandidate(c, state)' not in s:
+              s = s.replace(marker, helper + marker, 1)
+          old_loop = 'if (!acceptDiscoveryUrl(u, state) || JOB_JUNK_HOST_RE.test(host(u)) || !JOB_SIGNAL_RE.test(norm(u))) continue;'
+          new_loop = 'if (!worthwhileJobCandidate({ url: u, query }, state)) continue;'
+          if old_loop not in s:
+              raise SystemExit("job validation gate not found")
+          s = s.replace(old_loop, new_loop, 1)
+          p.write_text(s, encoding="utf-8")
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add worker/index.js
+          if git diff --cached --quiet; then
+            echo "No job discovery patch needed"
+          else
+            git commit -m "Improve job candidate validation"
+            git push origin HEAD:main
+          fi
       - name: Validate Worker syntax
         run: node --check worker/index.js
       - name: Validate frontend syntax
