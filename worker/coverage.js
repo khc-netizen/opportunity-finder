@@ -57,11 +57,11 @@ function withLens(request, lens) {
   return new Request(u, request);
 }
 
-async function adaptive(request, field, lens, minimum) {
-  const first = await jsonResponse(await baseWorker.fetch(request));
+async function adaptive(request, env, ctx, field, lens, minimum) {
+  const first = await jsonResponse(await baseWorker.fetch(request, env, ctx));
   if (!first.data || !Array.isArray(first.data[field]) || first.data[field].length >= minimum) return first.response;
 
-  const second = await jsonResponse(await baseWorker.fetch(withLens(request, lens)));
+  const second = await jsonResponse(await baseWorker.fetch(withLens(request, lens), env, ctx));
   if (!second.data || !Array.isArray(second.data[field])) return first.response;
 
   const merged = uniqueItems([...first.data[field], ...second.data[field]]);
@@ -86,19 +86,19 @@ async function adaptive(request, field, lens, minimum) {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    if (url.pathname === "/groups") return adaptive(request, "groups", GROUP_LENS, 6);
-    if (url.pathname === "/events") return adaptive(request, "events", EVENT_LENS, 8);
-    if (url.pathname === "/jobs") return adaptive(request, "items", JOB_LENS, 6);
+    if (url.pathname === "/groups") return adaptive(request, env, ctx, "groups", GROUP_LENS, 6);
+    if (url.pathname === "/events") return adaptive(request, env, ctx, "events", EVENT_LENS, 8);
+    if (url.pathname === "/jobs") return adaptive(request, env, ctx, "items", JOB_LENS, 6);
     if (url.pathname === "/discover") {
-      const first = await jsonResponse(await baseWorker.fetch(request));
+      const first = await jsonResponse(await baseWorker.fetch(request, env, ctx));
       if (!first.data) return first.response;
-      let result = first.data;
+      const result = { ...first.data };
       if (Array.isArray(first.data.groups) && first.data.groups.length < 6) {
-        const supplemental = await jsonResponse(await baseWorker.fetch(withLens(request, GROUP_LENS)));
+        const supplemental = await jsonResponse(await baseWorker.fetch(withLens(request, GROUP_LENS), env, ctx));
         if (Array.isArray(supplemental.data?.groups)) result.groups = uniqueItems([...first.data.groups, ...supplemental.data.groups]);
       }
       if (Array.isArray(first.data.events) && first.data.events.length < 8) {
-        const supplemental = await jsonResponse(await baseWorker.fetch(withLens(request, EVENT_LENS)));
+        const supplemental = await jsonResponse(await baseWorker.fetch(withLens(request, EVENT_LENS), env, ctx));
         if (Array.isArray(supplemental.data?.events)) result.events = uniqueItems([...first.data.events, ...supplemental.data.events]);
       }
       return new Response(JSON.stringify({ ...result, coverage: { adaptiveLens: true } }, null, 2), {
