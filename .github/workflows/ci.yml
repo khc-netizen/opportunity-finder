@@ -42,3 +42,5 @@ jobs:
           grep -q 'const DANCE_RE' worker/index.js
           grep -q 'const AMISH_RE' worker/index.js
           test ! -d .github/workflows/recovery
+      - name: Run architecture regression checks
+        run: node tests/architecture-check.mjs
