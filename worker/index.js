@@ -98,7 +98,9 @@ const VENUE_RE = /(?:museum|library|historic site|historical site|heritage cente
 const EVENT_RE = /(?:event|calendar|meeting|workshop|program|programme|exhibit|exhibition|festival|fair|lecture|tour|open house|class|demo|demonstration|registration|tickets|admission|rsvp)/i;
 const LOCAL_REGION_RE = /\b(?:ohio|trumbull|warren|northeast ohio|geauga|portage|ashtabula|mahoning|columbiana|summit|lake|cuyahoga)\b/i;
 const DISCOVERY_SIGNAL_RE = /\b(?:association|society|museum|library|guild|club|chapter|shire|sca|blacksmith|blacksmiths|beekeep|beekeepers|reenact|history|historical|heritage|preservation|nature|conservation|arboretum|observatory|community|farm|homestead|park|volunteer|events?|calendar|meeting|workshop|program|festival|fair|lecture|tour|exhibit|class|jobs?|career|employment|hiring|position|apply|technician|welder|welding|fabricat|mechanic|warehouse|laborer|maintenance|delivery|transportation)\b/i;
-const JOB_SIGNAL_RE = /\b(?:job|jobs|career|careers|employment|hiring|position|apply|work|technician|welder|welding|fabricat|mechanic|warehouse|laborer|parks|grounds|recreation|museum|archaeology|custod|maintenance|delivery|transportation)\b/i;
+const JOB_SIGNAL_RE = /\b(?:job|jobs|career|careers|employment|hiring|position|apply|application|work with us|join our team|job openings|vacancy|vacancies|technician|welder|welding|fabricat|mechanic|warehouse|laborer|parks|grounds|recreation|museum|archaeology|custod|maintenance|delivery|transportation)\b/i;
+const JOB_CONTENT_RE = /(?:\bjob\s+(?:opening|openings|posting|postings|opportunity|opportunities|listing|listings)\b|\b(?:career|careers)\s+(?:page|site|portal|opportunities)\b|\bapply\s+(?:now|today|online)\b|\bjoin\s+(?:our|the)\s+team\b|\bwork\s+with\s+(?:us|our)\b|\bemployment\s+(?:opportunities|application|page)\b|\bcurrent\s+(?:openings|vacancies)\b)/i;
+const JOB_REFERENCE_RE = /(?:wikihow|how-to|definition|what is|types of|learning center|learning-centre|guide|tutorial|dictionary|encyclopedia|article|blog|podcast|news|3d warehouse|power query)/i;
 const DISCOVERY_QUALITY_PASS = "2026-09-10";
 const GENERIC_CONTENT_PATH_RE = /\/(?:story|stories|press|press-release|opinion|blog|podcast|dictionary|definition|encyclopedia|faq|how-to)(?:[/?#]|$)/i;
 const SEARCH_NOISE_RE = /\b(?:ancient mesopotamia|mesopotamia river|mesopotamian|louisiana|church point)\b/i;
@@ -360,9 +362,16 @@ function worthwhileJobCandidate(c, state) {
   const queryText = norm(c?.query || "");
   const combined = `${urlText} ${queryText}`;
   if (SEARCH_NOISE_RE.test(combined) || GENERIC_CONTENT_PATH_RE.test(String(c?.url || ""))) return false;
+  if (JOB_REFERENCE_RE.test(combined)) return false;
   if (JOB_JUNK_HOST_RE.test(host(c?.url || ""))) return false;
   if (!acceptDiscoveryUrl(c?.url || "", state)) return false;
-  return JOB_SIGNAL_RE.test(combined) || CAREER_RE.test(combined);
+  const urlCareer = CAREER_RE.test(urlText);
+  const contentSignal = JOB_CONTENT_RE.test(combined);
+  const jobSignal = JOB_SIGNAL_RE.test(combined);
+  if (urlCareer || contentSignal) return true;
+  // A search result with only a generic occupational term is not worth an expensive fetch.
+  // Permit an employer-looking homepage only when the URL/query carries a strong job signal.
+  return jobSignal && /(?:jobs?|careers?|employment|hiring|work|team|apply|position|vacanc|opportunit)/i.test(combined);
 }
 
 function worthwhileDiscoveryCandidate(c, state, mode) {
