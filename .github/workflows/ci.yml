@@ -48,3 +48,5 @@ jobs:
         run: node tests/architecture-check.mjs
       - name: Run discovery coverage checks
         run: node tests/coverage-check.mjs
+      - name: Run coverage quality checks
+        run: node tests/coverage-quality-check.mjs
