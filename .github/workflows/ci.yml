@@ -1,0 +1,32 @@
+name: Opportunity Finder CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Validate Worker syntax
+        run: node --check worker/index.js
+      - name: Validate frontend syntax
+        run: node --check <(python3 -c 'import re; s=open("public/index.html", encoding="utf-8").read(); print(re.search(r"<script>([\\s\\S]*?)</script>", s).group(1))')
+      - name: Verify required architecture markers
+        run: |
+          grep -q 'architecture: "organization-first"' worker/index.js
+          grep -q 'const DANCE_RE' worker/index.js
+          grep -q 'const AMISH_RE' worker/index.js
+          grep -q 'function discoverJobs' worker/index.js
+          test ! -d .github/workflows/recovery
