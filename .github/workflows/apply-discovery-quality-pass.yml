@@ -1,15 +1,1 @@
-name: Apply Discovery Quality Pass
-
-on:
-  push:
-    branches: [main]
-
-permissions:
-  contents: write
-
-jobs:
-  quality-pass:
-    if: false
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo disabled
+# Temporary runner removed; this file intentionally left as a no-op placeholder.
