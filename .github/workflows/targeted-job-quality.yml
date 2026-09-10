@@ -1,0 +1,64 @@
+name: Opportunity Finder Targeted Job Quality
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+      - name: Apply targeted job candidate quality patch
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("worker/index.js")
+          s = p.read_text(encoding="utf-8")
+          s = s.replace('const JOB_WEB_VALIDATION_LIMIT = 1;', 'const JOB_WEB_VALIDATION_LIMIT = 2;', 1)
+          marker = 'function worthwhileDiscoveryCandidate(c, state, mode) {'
+          helper = '''function worthwhileJobCandidate(c, state) {
+            const urlText = norm(c?.url || "");
+            const queryText = norm(c?.query || "");
+            const combined = `${urlText} ${queryText}`;
+            if (SEARCH_NOISE_RE.test(combined) || GENERIC_CONTENT_PATH_RE.test(String(c?.url || ""))) return false;
+            if (JOB_JUNK_HOST_RE.test(host(c?.url || ""))) return false;
+            if (!acceptDiscoveryUrl(c?.url || "", state)) return false;
+            return JOB_SIGNAL_RE.test(combined) || CAREER_RE.test(combined);
+          }
+
+          '''
+          if 'function worthwhileJobCandidate(c, state)' not in s:
+              if marker not in s:
+                  raise SystemExit('discovery helper marker not found')
+              s = s.replace(marker, helper + marker, 1)
+          old = 'if (!acceptDiscoveryUrl(u, state) || JOB_JUNK_HOST_RE.test(host(u)) || !JOB_SIGNAL_RE.test(norm(u))) continue;'
+          new = 'if (!worthwhileJobCandidate({ url: u, query }, state)) continue;'
+          if old not in s:
+              raise SystemExit('job validation gate not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s, encoding="utf-8")
+          PY
+      - name: Validate Worker syntax
+        run: node --check worker/index.js
+      - name: Verify targeted job quality patch
+        run: |
+          grep -q 'const JOB_WEB_VALIDATION_LIMIT = 2;' worker/index.js
+          grep -q 'function worthwhileJobCandidate(c, state)' worker/index.js
+          grep -q 'worthwhileJobCandidate({ url: u, query }, state)' worker/index.js
+          grep -q 'architecture: "organization-first"' worker/index.js
+          grep -q 'const DANCE_RE' worker/index.js
+          grep -q 'const AMISH_RE' worker/index.js
+      - name: Commit worker patch and remove temporary workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add worker/index.js
+          git commit -m "Improve job candidate validation"
+          git rm .github/workflows/targeted-job-quality.yml
+          git commit -m "Remove temporary job quality workflow"
+          git push origin HEAD:main
