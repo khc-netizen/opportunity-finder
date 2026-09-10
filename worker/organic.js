@@ -16,12 +16,27 @@ function validUrl(url) { try { const u = new URL(url); return /^https?:$/.test(u
 function key(url) { try { const u = new URL(url); return `${u.hostname.toLowerCase()}${u.pathname.replace(/\/$/, "")}`; } catch { return String(url || "").toLowerCase(); } }
 function absolute(href, base) { try { return new URL(href, base).href; } catch { return ""; } }
 function decodeHref(href) { return String(href || "").replace(/&amp;/g, "&").replace(/\\u0026/g, "&"); }
+function unwrapSearchUrl(url) {
+  try {
+    const u = new URL(url);
+    if (!/^(?:www\.)?bing\.com$/i.test(u.hostname) || !u.pathname.startsWith("/ck/a")) return url;
+    const encoded = u.searchParams.get("u") || "";
+    if (!encoded) return url;
+    const payload = encoded.startsWith("a1") ? encoded.slice(2) : encoded;
+    try {
+      const decoded = atob(payload.replace(/-/g, "+").replace(/_/g, "/"));
+      if (/^https?:\/\//i.test(decoded)) return decoded;
+    } catch {}
+    return url;
+  } catch { return url; }
+}
 function extractLinks(html, base) {
   const out = [];
   const re = /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
   let m;
-  while ((m = re.exec(html)) && out.length < 12) {
-    const url = absolute(decodeHref(m[1]), base);
+  while ((m = re.exec(html)) && out.length < 20) {
+    const rawUrl = absolute(decodeHref(m[1]), base);
+    const url = unwrapSearchUrl(rawUrl);
     const text = clean(m[2]);
     if (!validUrl(url) || !text) continue;
     if (NOISE_RE.test(`${text} ${url}`)) continue;
@@ -134,5 +149,5 @@ export async function organicDiscover(interests, city, state, radius = 75) {
   const budget = { used: 0, limit: 44 }; const started = Date.now();
   const groupResult = await discoverGroups(interests, city, state, budget);
   const eventResult = await discoverEvents(groupResult.groups, interests, city, state, budget);
-  return { ok: true, version: "3.11.4", build: "v3.11.4-organic-syntax-fix", groups: groupResult.groups, events: eventResult.events, jobs: [], fetchBudget: { used: budget.used, limit: budget.limit }, coverage: { radius, organicGroups: groupResult.groups.length, organicEvents: eventResult.events.length, candidateCount: groupResult.candidateCount }, diagnostics: [...groupResult.diagnostics, ...eventResult.diagnostics], durationMs: Date.now() - started };
+  return { ok: true, version: "3.11.5", build: "v3.11.5-search-url-fix", groups: groupResult.groups, events: eventResult.events, jobs: [], fetchBudget: { used: budget.used, limit: budget.limit }, coverage: { radius, organicGroups: groupResult.groups.length, organicEvents: eventResult.events.length, candidateCount: groupResult.candidateCount }, diagnostics: [...groupResult.diagnostics, ...eventResult.diagnostics], durationMs: Date.now() - started };
 }
