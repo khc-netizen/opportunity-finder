@@ -99,6 +99,9 @@ const EVENT_RE = /(?:event|calendar|meeting|workshop|program|programme|exhibit|e
 const LOCAL_REGION_RE = /\b(?:ohio|trumbull|warren|northeast ohio|geauga|portage|ashtabula|mahoning|columbiana|summit|lake|cuyahoga)\b/i;
 const DISCOVERY_SIGNAL_RE = /\b(?:association|society|museum|library|guild|club|chapter|shire|sca|blacksmith|blacksmiths|beekeep|beekeepers|reenact|history|historical|heritage|preservation|nature|conservation|arboretum|observatory|community|farm|homestead|park|volunteer|events?|calendar|meeting|workshop|program|festival|fair|lecture|tour|exhibit|class|jobs?|career|employment|hiring|position|apply|technician|welder|welding|fabricat|mechanic|warehouse|laborer|maintenance|delivery|transportation)\b/i;
 const JOB_SIGNAL_RE = /\b(?:job|jobs|career|careers|employment|hiring|position|apply|work|technician|welder|welding|fabricat|mechanic|warehouse|laborer|parks|grounds|recreation|museum|archaeology|custod|maintenance|delivery|transportation)\b/i;
+const DISCOVERY_QUALITY_PASS = "2026-09-10";
+const GENERIC_CONTENT_PATH_RE = /\/(?:story|stories|press|press-release|opinion|blog|podcast|dictionary|definition|encyclopedia|faq|how-to)(?:[/?#]|$)/i;
+const SEARCH_NOISE_RE = /\b(?:ancient mesopotamia|mesopotamia river|mesopotamian|louisiana|church point)\b/i;
 
 function parseHomeLocation(value) {
   const raw = clean(value);
@@ -237,7 +240,8 @@ async function discover(interests, city, state, radius, env) {
     const r = await searchWeb(query, env, budget);
     diagnostics.push({ stage: "organization-search", source: "search", query, ok: r.ok, status: r.status, parser: r.parser || null, candidates: r.urls.length, milliseconds: r.milliseconds, bytes: r.bytes, error: r.ok ? null : r.error });
     for (const u of r.urls) {
-      if (acceptDiscoveryUrl(u, state) && (DISCOVERY_SIGNAL_RE.test(norm(u)) || DISCOVERY_SIGNAL_RE.test(norm(query)))) orgCandidates.push({ url: u, query });
+      const candidate = { url: u, query };
+      if (acceptDiscoveryUrl(u, state) && worthwhileDiscoveryCandidate(candidate, state, "organization")) orgCandidates.push(candidate);
     }
   }
 
@@ -267,7 +271,7 @@ async function discover(interests, city, state, radius, env) {
   for (const query of buildVenueQueries(interests, city, state).slice(0, VENUE_DISCOVERY_QUERY_LIMIT)) {
     const r = await searchWeb(query, env, budget);
     diagnostics.push({ stage: "venue-search", source: "search", query, ok: r.ok, status: r.status, parser: r.parser || null, candidates: r.urls.length, milliseconds: r.milliseconds, bytes: r.bytes, error: r.ok ? null : r.error });
-    for (const u of r.urls) if (acceptDiscoveryUrl(u, state)) venueCandidates.push({ url: u, query });
+    for (const u of r.urls) { const candidate = { url: u, query }; if (acceptDiscoveryUrl(u, state) && worthwhileDiscoveryCandidate(candidate, state, "venue")) venueCandidates.push(candidate); }
   }
   const venues = [];
   for (const c of prioritizeCandidateUrls(venueCandidates).slice(0, VENUE_VALIDATION_LIMIT)) {
@@ -307,7 +311,8 @@ async function discover(interests, city, state, radius, env) {
       const r = await searchWeb(query, env, eventBudget);
       diagnostics.push({ stage: "event-search", organization: org.name, query, ok: r.ok, status: r.status, candidates: r.urls.length, milliseconds: r.milliseconds, bytes: r.bytes, error: r.ok ? null : r.error });
       for (const u of r.urls.slice(0, 4)) {
-        if (!acceptDiscoveryUrl(u, state) || (!EVENT_RE.test(norm(u)) && !DISCOVERY_SIGNAL_RE.test(norm(u)) && !sameHost(u, org.url)) || JOB_JUNK_HOST_RE.test(host(u)) || eventBudget.used >= eventBudget.limit) continue;
+        const candidate = { url: u, query };
+        if (!acceptDiscoveryUrl(u, state) || !worthwhileDiscoveryCandidate(candidate, state, "event") || (!EVENT_RE.test(norm(u)) && !DISCOVERY_SIGNAL_RE.test(norm(u)) && !sameHost(u, org.url)) || JOB_JUNK_HOST_RE.test(host(u)) || eventBudget.used >= eventBudget.limit) continue;
         const pr = await fetchText(u, {}, eventBudget);
         const d = { stage: "event-validation", organization: org.name, url: u, ok: pr.ok, status: pr.status, accepted: 0, rejected: null };
         if (!pr.ok) { d.rejected = pr.error || `HTTP ${pr.status}`; diagnostics.push(d); continue; }
@@ -350,12 +355,24 @@ function trustedSeedName(url) {
   if (h.includes("trumbullcountyhistory.org/trumbull-history-hub")) return "Trumbull History Hub";
   try { return humanizeHostname(new URL(url).hostname).replace(/\b\w/g, c => c.toUpperCase()); } catch { return "Trusted local organization"; }
 }
+function worthwhileDiscoveryCandidate(c, state, mode) {
+  const urlText = norm(c?.url || "");
+  const queryText = norm(c?.query || "");
+  const combined = `${urlText} ${queryText}`;
+  if (SEARCH_NOISE_RE.test(combined) || GENERIC_CONTENT_PATH_RE.test(String(c?.url || ""))) return false;
+  if (mode === "organization") return !!c?.trusted || DISCOVERY_SIGNAL_RE.test(combined);
+  if (mode === "venue") return VENUE_RE.test(combined) || DISCOVERY_SIGNAL_RE.test(combined);
+  if (mode === "event") return EVENT_RE.test(combined) || DISCOVERY_SIGNAL_RE.test(combined);
+  return false;
+}
+
 function acceptDiscoveryUrl(u, state) {
   if (!isHttp(u)) return false;
   try {
     const x = new URL(u);
     if (JUNK_HOST_RE.test(x.hostname)) return false;
     if (LOW_VALUE_HOST_RE.test(x.hostname) || LOW_VALUE_PATH_RE.test(x.pathname)) return false;
+    if (GENERIC_CONTENT_PATH_RE.test(x.pathname)) return false;
     if (isObviousOutOfState(x.href, state)) return false;
     return true;
   } catch { return false; }
