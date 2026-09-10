@@ -66,7 +66,7 @@ const SAFE_FETCH_LIMIT = 44;
 const EVENT_FETCH_LIMIT = 8;
 const USA_DISCOVERY_ANCHOR_LIMIT = 6;
 const USA_DISCOVERY_QUERY_LIMIT = 5;
-const JOB_WEB_VALIDATION_LIMIT = 1;
+const JOB_WEB_VALIDATION_LIMIT = 2;
 const PAGE_LIMIT = 72;
 
 // Verified regional organizations/venues used as discovery anchors. These are organization seeds,
@@ -355,6 +355,16 @@ function trustedSeedName(url) {
   if (h.includes("trumbullcountyhistory.org/trumbull-history-hub")) return "Trumbull History Hub";
   try { return humanizeHostname(new URL(url).hostname).replace(/\b\w/g, c => c.toUpperCase()); } catch { return "Trusted local organization"; }
 }
+function worthwhileJobCandidate(c, state) {
+  const urlText = norm(c?.url || "");
+  const queryText = norm(c?.query || "");
+  const combined = `${urlText} ${queryText}`;
+  if (SEARCH_NOISE_RE.test(combined) || GENERIC_CONTENT_PATH_RE.test(String(c?.url || ""))) return false;
+  if (JOB_JUNK_HOST_RE.test(host(c?.url || ""))) return false;
+  if (!acceptDiscoveryUrl(c?.url || "", state)) return false;
+  return JOB_SIGNAL_RE.test(combined) || CAREER_RE.test(combined);
+}
+
 function worthwhileDiscoveryCandidate(c, state, mode) {
   const urlText = norm(c?.url || "");
   const queryText = norm(c?.query || "");
@@ -708,7 +718,7 @@ async function discoverJobs(interests, city, state, radius, partTime, env) {
     diagnostics.push({ stage: "job-search", query, ok: r.ok, status: r.status, parser: r.parser || null, candidates: r.urls.length, milliseconds: r.milliseconds, bytes: r.bytes, error: r.ok ? null : r.error });
     for (const u of r.urls.slice(0, JOB_WEB_VALIDATION_LIMIT)) {
       if (budget.used >= budget.limit) break;
-      if (!acceptDiscoveryUrl(u, state) || JOB_JUNK_HOST_RE.test(host(u)) || !JOB_SIGNAL_RE.test(norm(u))) continue;
+      if (!worthwhileJobCandidate({ url: u, query }, state)) continue;
       const pr = await fetchText(u, {}, budget);
       const d = { stage: "job-validation", url: u, ok: pr.ok, status: pr.status, accepted: 0, rejected: null };
       if (!pr.ok) { d.rejected = pr.error || `HTTP ${pr.status}`; diagnostics.push(d); continue; }
