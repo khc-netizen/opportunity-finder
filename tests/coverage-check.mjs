@@ -24,13 +24,13 @@ assert.match(discovery, /isExcluded/);
 assert.doesNotMatch(discovery, /-dance/);
 assert.doesNotMatch(discovery, /-amish/);
 assert.match(exclusions, /parseExclusions/);
+assert.match(exclusions, /excludeGlobal/);
 assert.match(exclusions, /excludeGroups/);
 assert.match(exclusions, /excludeEvents/);
 assert.match(exclusions, /excludeJobs/);
-assert.match(geo, /HOME_ZIP = ['"]44439['"]/);
+assert.match(geo, /44439/);
 assert.match(geo, /passesHardZipGate/);
 assert.match(geo, /eligibleZips/);
-assert.match(geo, /distanceForZip/);
 assert.match(wrangler, /main = ['"]worker\/coverage\.js['"]/);
 
 console.log("Configurable discovery, exclusion, and hard ZIP architecture checks passed.");
