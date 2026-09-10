@@ -23,9 +23,11 @@ jobs:
         run: node --check worker/index.js
       - name: Validate coverage layer syntax
         run: node --check worker/coverage.js
-      - name: Validate organic discovery syntax
+      - name: Validate configurable discovery syntax
+        run: node --check worker/discovery.js && node --check worker/exclusions.js
+      - name: Validate legacy organic discovery syntax
         run: node --check worker/organic.js
-      - name: Validate job discovery syntax
+      - name: Validate legacy job discovery syntax
         run: node --check worker/job-discovery.js
       - name: Validate ZIP geography syntax
         run: node --check worker/zip-geo.js
@@ -49,10 +51,15 @@ jobs:
           grep -q 'id="groupRadius"' public/index.html
           grep -q 'id="eventRadius"' public/index.html
           grep -q 'id="jobRadius"' public/index.html
-          grep -q 'groupRadius' public/index.html
-          grep -q 'eventRadius' public/index.html
-          grep -q 'jobRadius' public/index.html
-      - name: Verify required architecture markers
+      - name: Validate configurable exclusions
+        run: |
+          grep -q 'id="excludeGlobal"' public/index.html
+          grep -q 'id="excludeGroups"' public/index.html
+          grep -q 'id="excludeEvents"' public/index.html
+          grep -q 'id="excludeJobs"' public/index.html
+          grep -q 'configurable-exclusions' worker/coverage.js
+          grep -q 'parseExclusions' worker/discovery.js
+      - name: Verify required legacy architecture markers
         run: |
           grep -q 'architecture: "organization-first"' worker/index.js
           grep -q 'const DANCE_RE' worker/index.js
