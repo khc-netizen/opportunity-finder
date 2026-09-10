@@ -10,15 +10,15 @@ const ORG_RE = /association|society|club|guild|chapter|organization|organisation
 const EVENT_RE = /event|calendar|meeting|workshop|program|programme|exhibit|exhibition|festival|fair|lecture|tour|open house|class|demo|demonstration|registration|tickets|rsvp/i;
 const LOCAL_RE = /ohio|trumbull|warren|northeast ohio|geauga|portage|ashtabula|mahoning|columbiana|summit|lake|cuyahoga/i;
 
-function clean(s) { return String(s || "").replace(/<script[\\s\\S]*?<\\/script>/gi, " ").replace(/<style[\\s\\S]*?<\\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&quot;/gi, '\"').replace(/&#39;|&#x27;/gi, "'").replace(/\\s+/g, " ").trim(); }
+function clean(s) { return String(s || "").replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&quot;/gi, '"').replace(/&#39;|&#x27;/gi, "'").replace(/\s+/g, " ").trim(); }
 function host(url) { try { return new URL(url).hostname.toLowerCase(); } catch { return ""; } }
 function validUrl(url) { try { const u = new URL(url); return /^https?:$/.test(u.protocol) && !JUNK_HOST_RE.test(u.hostname) && !CONTENT_HOST_RE.test(u.hostname) && !DIAGNOSTIC_SEED_HOST_RE.test(u.hostname); } catch { return false; } }
-function key(url) { try { const u = new URL(url); return `${u.hostname.toLowerCase()}${u.pathname.replace(/\\/$/, "")}`; } catch { return String(url || "").toLowerCase(); } }
+function key(url) { try { const u = new URL(url); return `${u.hostname.toLowerCase()}${u.pathname.replace(/\/$/, "")}`; } catch { return String(url || "").toLowerCase(); } }
 function absolute(href, base) { try { return new URL(href, base).href; } catch { return ""; } }
-function decodeHref(href) { return String(href || "").replace(/&amp;/g, "&").replace(/\\\\u0026/g, "&"); }
+function decodeHref(href) { return String(href || "").replace(/&amp;/g, "&").replace(/\\u0026/g, "&"); }
 function extractLinks(html, base) {
   const out = [];
-  const re = /<a[^>]+href=["']([^"']+)["'][^>]*>([\\s\\S]*?)<\\/a>/gi;
+  const re = /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
   let m;
   while ((m = re.exec(html)) && out.length < 12) {
     const url = absolute(decodeHref(m[1]), base);
@@ -29,22 +29,19 @@ function extractLinks(html, base) {
   }
   return out;
 }
-function titleFrom(html, fallback) { const m = html.match(/<title[^>]*>([\\s\\S]*?)<\\/title>/i); return clean(m ? m[1] : fallback); }
+function titleFrom(html, fallback) { const m = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i); return clean(m ? m[1] : fallback); }
 function meta(html, name) { const re = new RegExp(`<meta[^>]+(?:name|property)=["']${name}["'][^>]+content=["']([^"']*)["']`, "i"); const m = html.match(re); return clean(m ? m[1] : ""); }
 function interestTerms(interests) { return (interests.length ? interests : DEFAULT_INTERESTS).flatMap(x => String(x).split(/[,;]+/).map(y => y.trim()).filter(Boolean)); }
 function querySet(interests, city, state) {
   const terms = interestTerms(interests);
   const places = [`"${city}" "${state}"`, `"Trumbull County" Ohio`, `"Warren" Ohio`, `"Northeast Ohio"`, `"Geauga County" Ohio`, `"Portage County" Ohio`, `"Ashtabula County" Ohio`, `"Mahoning County" Ohio`];
   const queries = [];
-  // Interleave interests and places so the first few searches cannot be dominated by
-  // the first three default interests. Keep the pass bounded for Cloudflare subrequest limits.
   const selectedTerms = terms.slice(0, 8);
   for (let i = 0; i < selectedTerms.length && queries.length < 12; i++) {
     const term = selectedTerms[i];
     const place = places[i % places.length];
     queries.push(`${place} "${term}" (${GROUP_TYPES.slice(0, 8).join(" OR ")}) -dance -"ancient Mesopotamia" -"Mesopotamian"`);
   }
-  // Add a second regional pass using different places/terms when budget permits.
   for (let i = 0; i < Math.min(selectedTerms.length, places.length) && queries.length < 12; i++) {
     const term = selectedTerms[(i + 3) % selectedTerms.length];
     const place = places[(i + 3) % places.length];
@@ -137,5 +134,5 @@ export async function organicDiscover(interests, city, state, radius = 75) {
   const budget = { used: 0, limit: 44 }; const started = Date.now();
   const groupResult = await discoverGroups(interests, city, state, budget);
   const eventResult = await discoverEvents(groupResult.groups, interests, city, state, budget);
-  return { ok: true, version: "3.11.0", build: "v3.11.0-organic-diverse", groups: groupResult.groups, events: eventResult.events, jobs: [], fetchBudget: { used: budget.used, limit: budget.limit }, coverage: { radius, organicGroups: groupResult.groups.length, organicEvents: eventResult.events.length, candidateCount: groupResult.candidateCount }, diagnostics: [...groupResult.diagnostics, ...eventResult.diagnostics], durationMs: Date.now() - started };
+  return { ok: true, version: "3.11.4", build: "v3.11.4-organic-syntax-fix", groups: groupResult.groups, events: eventResult.events, jobs: [], fetchBudget: { used: budget.used, limit: budget.limit }, coverage: { radius, organicGroups: groupResult.groups.length, organicEvents: eventResult.events.length, candidateCount: groupResult.candidateCount }, diagnostics: [...groupResult.diagnostics, ...eventResult.diagnostics], durationMs: Date.now() - started };
 }
