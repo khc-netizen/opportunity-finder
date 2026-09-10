@@ -14,12 +14,22 @@ const DIAGNOSTIC_SEEDS = [
 ];
 
 function cleanUrlText(value) { return String(value || '').toLowerCase().replace(/https?:\/\//g, '').replace(/[^a-z0-9]+/g, ' ').trim(); }
-function explicitOutsideStateUrl(value, state) {
-  if (!/^(OH|Ohio)$/i.test(state)) return false;
+function explicitOutsideStateUrl(value) {
   const t = cleanUrlText(value);
   const outside = '(?:al|ak|az|ar|ca|co|ct|de|fl|ga|hi|id|il|in|ia|ks|ky|la|me|md|ma|mi|mn|ms|mo|mt|ne|nv|nh|nj|nm|ny|nc|nd|ok|or|pa|ri|sc|sd|tn|tx|ut|vt|va|wa|wv|wi|wy|alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new hampshire|new jersey|new mexico|new york|north carolina|north dakota|oklahoma|oregon|pennsylvania|rhode island|south carolina|south dakota|tennessee|texas|utah|vermont|virginia|washington|west virginia|wisconsin|wyoming)';
   return new RegExp('\\b[a-z]+(?:\\s+[a-z]+){0,4}\\s+' + outside + '\\b', 'i').test(t);
 }
+const nativeFetch = globalThis.fetch.bind(globalThis);
+globalThis.fetch = async function opportunityFinderPrefetchGuard(input, init) {
+  const target = typeof input === 'string' ? input : input?.url || String(input || '');
+  if (explicitOutsideStateUrl(target)) {
+    return new Response(JSON.stringify({ blocked: true, reason: 'explicit out-of-state URL blocked before network fetch', url: target }), {
+      status: 451,
+      headers: { 'Content-Type': 'application/json; charset=utf-8', 'X-Opportunity-Finder-Prefetch-Blocked': 'out-of-state' }
+    });
+  }
+  return nativeFetch(input, init);
+};
 
 async function jsonResponse(response) { const text = await response.text(); try { return { response, data: JSON.parse(text) }; } catch { return { response, data: null }; } }
 function requestParams(request) { const u = new URL(request.url); const interests = String(u.searchParams.get('interests') || '').split(',').map(x => x.trim()).filter(Boolean); const city = u.searchParams.get('city') || 'Mesopotamia'; const state = u.searchParams.get('state') || 'OH'; const radius = Number(u.searchParams.get('radius') || 75); return { interests, city, state, radius }; }
@@ -27,27 +37,7 @@ function release(data) { return { ...data, deployment: { version: RELEASE, build
 function uniqueItems(items = []) { const seen = new Set(); return items.filter(item => { const key = `${String(item?.title || item?.name || '').toLowerCase()}|${String(item?.url || item?.link || '').toLowerCase()}`; if (seen.has(key)) return false; seen.add(key); return true; }); }
 function fallbackItem(item) { return { ...item, discoverySource: 'seed-fallback' }; }
 
-async function jobsFor(request, env, ctx) {
-  const u = new URL(request.url);
-  const params = requestParams(request);
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async function guardedFetch(input, init) {
-    const target = typeof input === 'string' ? input : input?.url || String(input || '');
-    if (explicitOutsideStateUrl(target, params.state)) {
-      return new Response(JSON.stringify({ blocked: true, reason: 'explicit out-of-state URL blocked before network fetch', url: target }), {
-        status: 451,
-        headers: { 'Content-Type': 'application/json; charset=utf-8', 'X-Opportunity-Finder-Prefetch-Blocked': 'out-of-state' }
-      });
-    }
-    return originalFetch(input, init);
-  };
-  try {
-    u.pathname = '/jobs';
-    return jsonResponse(await baseWorker.fetch(new Request(u, request), env, ctx));
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-}
+async function jobsFor(request, env, ctx) { const u = new URL(request.url); u.pathname = '/jobs'; return jsonResponse(await baseWorker.fetch(new Request(u, request), env, ctx)); }
 
 async function discovery(request, env, ctx) {
   const p = requestParams(request);
