@@ -11,6 +11,11 @@ assert.match(coverage, /JOB_LENS/);
 assert.match(coverage, /adaptiveLens/);
 assert.match(coverage, /uniqueItems/);
 assert.match(coverage, /baseWorker\.fetch\(request, env, ctx\)/);
+assert.match(coverage, /u\.searchParams\.set\(\"interests\", lens\.join\(\",\"\)\)/);
+assert.match(coverage, /primaryUsed/);
+assert.match(coverage, /maxPrimaryFetches/);
+assert.match(coverage, /\/jobs.*baseWorker\.fetch/s);
+assert.match(coverage, /\/discover.*baseWorker\.fetch/s);
 assert.match(wrangler, /main = \"worker\/coverage\.js\"/);
 
 console.log("Discovery coverage checks passed.");
