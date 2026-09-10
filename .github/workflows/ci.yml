@@ -56,3 +56,5 @@ jobs:
         run: node tests/coverage-check.mjs
       - name: Run verified ZIP geography checks
         run: node tests/zip-geo-check.mjs
+      - name: Run independent ZIP radius checks
+        run: node tests/independent-radius-check.mjs
