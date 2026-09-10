@@ -3,7 +3,7 @@ import baseWorker from "./index.js";
 // The first pass remains interest-led. When it is sparse, the second pass is
 // deliberately independent: it searches by regional community hubs and then lets
 // the base worker apply the same geographic, dance, and quality validation.
-const GROUP_REGIONAL_LENS = [
+const GROUP_LENS = [
   "community organizations Warren Ohio",
   "historical societies Cortland Ohio",
   "museums Garrettsville Ohio",
@@ -14,7 +14,18 @@ const GROUP_REGIONAL_LENS = [
   "gardening clubs Ravenna Ohio"
 ];
 
-const EVENT_REGIONAL_LENS = [
+const JOB_LENS = [
+  "maintenance",
+  "welding fabrication",
+  "mechanic technician",
+  "parks recreation",
+  "museum archaeology",
+  "warehouse material handling",
+  "grounds laborer",
+  "facility technician"
+];
+
+const EVENT_LENS = [
   "community events Warren Ohio",
   "history events Cortland Ohio",
   "museum programs Garrettsville Ohio",
@@ -82,8 +93,8 @@ async function adaptive(request, env, ctx, field, lens, minimum, maxPrimaryFetch
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    if (url.pathname === "/groups") return adaptive(request, env, ctx, "groups", GROUP_REGIONAL_LENS, 6, 22);
-    if (url.pathname === "/events") return adaptive(request, env, ctx, "events", EVENT_REGIONAL_LENS, 8, 22);
+    if (url.pathname === "/groups") return adaptive(request, env, ctx, "groups", GROUP_LENS, 6, 22);
+    if (url.pathname === "/events") return adaptive(request, env, ctx, "events", EVENT_LENS, 8, 22);
     // Jobs use ~38/44 fetches, so a second full pass is intentionally disabled.
     if (url.pathname === "/jobs") return baseWorker.fetch(request, env, ctx);
     // The combined endpoint must stay within the shared subrequest ceiling.
