@@ -44,6 +44,14 @@ jobs:
           print(f"Extracted {len(scripts)} inline script block(s)")
           PY
           node --check /tmp/frontend-check.js
+      - name: Validate independent radius UI
+        run: |
+          grep -q 'id="groupRadius"' public/index.html
+          grep -q 'id="eventRadius"' public/index.html
+          grep -q 'id="jobRadius"' public/index.html
+          grep -q 'groupRadius' public/index.html
+          grep -q 'eventRadius' public/index.html
+          grep -q 'jobRadius' public/index.html
       - name: Verify required architecture markers
         run: |
           grep -q 'architecture: "organization-first"' worker/index.js
