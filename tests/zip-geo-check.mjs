@@ -11,5 +11,8 @@ assert.equal(passesHardZipGate("Dunn NC 28334", 30), false);
 assert.equal(passesHardZipGate("https://www.indeed.com/q-Warehouse-l-Dunn,-NC-jobs.html", 30), false);
 assert.equal(bestLocation("Cortland OH 44410", 30)?.zip, "44410");
 assert.ok(eligibleZips(30).every(x => x.distance <= 30));
+assert.ok(eligibleZips(15).some(x => x.zip === "44410"));
+assert.ok(!eligibleZips(15).some(x => x.zip === "44481"));
+assert.ok(!eligibleZips(30).some(x => x.zip === "44240"));
 
 console.log("Verified ZIP geography checks passed.");
