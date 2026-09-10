@@ -1,0 +1,67 @@
+name: Job Prefetch Fix
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Patch job prefetch gate
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('worker/index.js')
+          s=p.read_text()
+          marker='function worthwhileJobCandidate(c, state) {'
+          start=s.index(marker)
+          brace=s.index('{',start)
+          depth=0
+          for i in range(brace,len(s)):
+              if s[i]=='{': depth+=1
+              elif s[i]=='}':
+                  depth-=1
+                  if depth==0:
+                      end=i+1
+                      break
+          helper='''function worthwhileJobCandidate(c, state) {
+  const rawUrl = String(c?.url || "");
+  const urlText = norm(rawUrl);
+  if (SEARCH_NOISE_RE.test(urlText) || GENERIC_CONTENT_PATH_RE.test(rawUrl)) return false;
+  if (JOB_REFERENCE_RE.test(urlText)) return false;
+  if (JOB_JUNK_HOST_RE.test(host(rawUrl))) return false;
+  if (!acceptDiscoveryUrl(rawUrl, state)) return false;
+  // Search queries always contain job/occupational words. Do not use query text to
+  // decide whether an expensive page fetch is worthwhile. Require the result URL
+  // itself to point at a hiring surface.
+  const pathSignal = /(?:\\bjobs?\\b|\\bcareers?\\b|\\bemployment\\b|\\bhiring\\b|\\brecruit(?:ment|ing)?\\b|\\bapply\\b|\\bapplication\\b|\\bopenings?\\b|\\bvacanc(?:y|ies)\\b|\\bpositions?\\b|\\bwork[-_ ]?with[-_ ]?(?:us|me)\\b|\\bjoin[-_ ]?(?:our|the)[-_ ]?team\\b|\\bopportunit(?:y|ies)\\b)/i.test(urlText);
+  return CAREER_RE.test(urlText) || pathSignal;
+}'''
+          s=s[:start]+helper+s[end:]
+          p.write_text(s)
+          PY
+      - name: Validate
+        run: node --check worker/index.js
+      - name: Verify
+        run: |
+          grep -q 'Search queries always contain' worker/index.js
+          grep -q 'const pathSignal' worker/index.js
+      - name: Commit and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add worker/index.js
+          git commit -m 'Require job-like URL paths before prefetch' || true
+          git rm .github/workflows/job-prefetch-fix.yml
+          git commit -m 'Remove one-time job prefetch fix'
+          git push origin HEAD:main
