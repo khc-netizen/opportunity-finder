@@ -1,9 +1,9 @@
 import baseWorker from './index.js';
 import { organicDiscover } from './organic.js';
 
-const RELEASE = '3.10.0';
-const RELEASE_BUILD = 'v3.10.0-organic-first';
-const RELEASE_FINGERPRINT = 'organic-first-2026-09-10';
+const RELEASE = '3.11.0';
+const RELEASE_BUILD = 'v3.11.0-organic-diverse';
+const RELEASE_FINGERPRINT = 'organic-diverse-2026-09-10';
 const GROUP_LENS = ['community organizations Warren Ohio','historical societies Cortland Ohio','museums Garrettsville Ohio','nature conservation Middlefield Ohio','traditional crafts Burton Ohio','archaeology Chardon Ohio','volunteer groups Kent Ohio','gardening clubs Ravenna Ohio'];
 const JOB_LENS = ['maintenance','welding fabrication','mechanic technician','parks recreation','museum archaeology','warehouse material handling','grounds laborer','facility technician'];
 const EVENT_LENS = ['community events Warren Ohio','history events Cortland Ohio','museum programs Garrettsville Ohio','nature events Middlefield Ohio','craft workshops Burton Ohio','archaeology events Chardon Ohio','volunteer events Kent Ohio','gardening events Ravenna Ohio'];
@@ -53,7 +53,7 @@ async function diagnostic(request, env, ctx) {
     groups: { stages: { organicSearchCandidates: organic.coverage?.candidateCount || 0, organicOrganizations: organic.groups.length, organicEventsFromOrganizations: organic.events.length }, fetchBudget: organic.fetchBudget, tail: organic.diagnostics.slice(-12), seedFallbackUsed: !organic.groups.length, legacyFallbackAvailable: !!legacy?.data },
     events: { stages: { organicOrganizations: organic.groups.length, organicEvents: organic.events.length }, fetchBudget: organic.fetchBudget, tail: organic.diagnostics.slice(-12), seedFallbackUsed: !organic.events.length, legacyFallbackAvailable: !!legacy?.data },
     jobs: { counts: { jobs: Array.isArray(jobs.data?.jobs) ? jobs.data.jobs.length : 0 }, fetchBudget: jobs.data?.fetchBudget || null, tail: jobs.data?.diagnostics?.slice?.(-12) || [] },
-    discoveryHealth: { organicGroups: organic.groups.length, organicEvents: organic.events.length, organicCandidateCount: organic.coverage?.candidateCount || 0, seedCoverage: `${foundSeeds}/${DIAGNOSTIC_SEEDS.length}`, seedCoveragePass: foundSeeds === DIAGNOSTIC_SEEDS.length, seedFallbackUsed: seedFallback, fallbackActivated: !!legacy?.data, organicResults: organic.groups.length + organic.events.length, recovery: { attempted: seedFallback, status: legacy?.data ? 'available' : 'not-needed' }, durationMs: Date.now() - started }
+    discoveryHealth: { organicGroups: organic.groups.length, organicEvents: organic.events.length, organicCandidateCount: organic.coverage?.candidateCount || 0, seedCoverage: `${foundSeeds}/${DIAGNOSTIC_SEEDS.length}`, seedCoveragePass: foundSeeds === DIAGNOSTIC_SEEDS.length, seedFallbackUsed: seedFallback, fallbackActivated: !!legacy?.data, organicResults: organic.groups.length + organic.events.length, discoveryPass: organic.groups.length > 0, recovery: { attempted: seedFallback, status: legacy?.data ? 'available' : 'not-needed' }, durationMs: Date.now() - started }
   }, null, 2), { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' } });
 }
 
