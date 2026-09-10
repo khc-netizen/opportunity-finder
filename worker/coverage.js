@@ -33,18 +33,7 @@ async function discovery(request, env, ctx) {
     }
   }
 
-  return release({
-    ok: true,
-    version: RELEASE,
-    build: RELEASE_BUILD,
-    architecture: 'organization-first / organic-first with explicit seed fallback',
-    groups,
-    events,
-    jobs: jobs.data?.jobs || [],
-    items: groups,
-    fetchBudget: { organic: organic.fetchBudget, jobs: jobs.data?.fetchBudget || null },
-    coverage: { ...(organic.coverage || {}), seedFallbackUsed, fallbackDiagnostics }
-  });
+  return release({ ok: true, version: RELEASE, build: RELEASE_BUILD, architecture: 'organization-first / organic-first with explicit seed fallback', groups, events, jobs: jobs.data?.jobs || [], items: groups, fetchBudget: { organic: organic.fetchBudget, jobs: jobs.data?.fetchBudget || null }, coverage: { ...(organic.coverage || {}), seedFallbackUsed, fallbackDiagnostics } });
 }
 
 async function diagnostic(request, env, ctx) {
@@ -61,35 +50,11 @@ async function diagnostic(request, env, ctx) {
     build: RELEASE_BUILD,
     worker: new URL(request.url).origin,
     architecture: 'organization-first / organic-first with explicit seed fallback',
-    groups: {
-      stages: { organicSearchCandidates: organic.coverage?.candidateCount || 0, organicOrganizations: organic.groups.length, organicEventsFromOrganizations: organic.events.length },
-      fetchBudget: organic.fetchBudget,
-      tail: organic.diagnostics.slice(-12),
-      seedFallbackUsed: !organic.groups.length,
-      legacyFallbackAvailable: !!legacy?.data
-    },
-    events: {
-      stages: { organicOrganizations: organic.groups.length, organicEvents: organic.events.length },
-      fetchBudget: organic.fetchBudget,
-      tail: organic.diagnostics.slice(-12),
-      seedFallbackUsed: !organic.events.length,
-      legacyFallbackAvailable: !!legacy?.data
-    },
+    groups: { stages: { organicSearchCandidates: organic.coverage?.candidateCount || 0, organicOrganizations: organic.groups.length, organicEventsFromOrganizations: organic.events.length }, fetchBudget: organic.fetchBudget, tail: organic.diagnostics.slice(-12), seedFallbackUsed: !organic.groups.length, legacyFallbackAvailable: !!legacy?.data },
+    events: { stages: { organicOrganizations: organic.groups.length, organicEvents: organic.events.length }, fetchBudget: organic.fetchBudget, tail: organic.diagnostics.slice(-12), seedFallbackUsed: !organic.events.length, legacyFallbackAvailable: !!legacy?.data },
     jobs: { counts: { jobs: Array.isArray(jobs.data?.jobs) ? jobs.data.jobs.length : 0 }, fetchBudget: jobs.data?.fetchBudget || null, tail: jobs.data?.diagnostics?.slice?.(-12) || [] },
-    discoveryHealth: { organicGroups: organic.groups.length, organicEvents: organic.events.length, organicCandidateCount: organic.coverage?.candidateCount || 0, seedFallbackUsed, fallbackActivated: !!legacy?.data, durationMs: Date.now() - started }
+    discoveryHealth: { organicGroups: organic.groups.length, organicEvents: organic.events.length, organicCandidateCount: organic.coverage?.candidateCount || 0, seedFallbackUsed: seedFallback, fallbackActivated: !!legacy?.data, durationMs: Date.now() - started }
   }, null, 2), { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' } });
 }
 
-export default {
-  async fetch(request, env, ctx) {
-    const url = new URL(request.url);
-    if (url.pathname === '/test') return diagnostic(request, env, ctx);
-    if (url.pathname === '/groups' || url.pathname === '/events' || url.pathname === '/discover') {
-      const result = await discovery(request, env, ctx);
-      if (url.pathname === '/groups') return new Response(JSON.stringify({ ...result, items: result.groups, events: undefined, jobs: undefined }, null, 2), { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' } });
-      if (url.pathname === '/events') return new Response(JSON.stringify({ ...result, items: result.events, groups: undefined, jobs: undefined, uniqueCount: result.events.length }, null, 2), { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' } });
-      return new Response(JSON.stringify(result, null, 2), { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' } });
-    }
-    return baseWorker.fetch(request, env, ctx);
-  }
-};
+export default { async fetch(request, env, ctx) { const url = new URL(request.url); if (url.pathname === '/test') return diagnostic(request, env, ctx); if (url.pathname === '/groups' || url.pathname === '/events' || url.pathname === '/discover') { const result = await discovery(request, env, ctx); if (url.pathname === '/groups') return new Response(JSON.stringify({ ...result, items: result.groups, events: undefined, jobs: undefined }, null, 2), { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' } }); if (url.pathname === '/events') return new Response(JSON.stringify({ ...result, items: result.events, groups: undefined, jobs: undefined, uniqueCount: result.events.length }, null, 2), { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' } }); return new Response(JSON.stringify(result, null, 2), { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' } }); } return baseWorker.fetch(request, env, ctx); } };
