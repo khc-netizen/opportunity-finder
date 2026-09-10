@@ -1,36 +1,28 @@
 import baseWorker from "./index.js";
 
-const GROUP_LENS = [
-  "local historical societies",
-  "museums",
-  "nature conservation",
-  "traditional crafts",
-  "archaeology",
-  "community organizations",
-  "volunteer groups",
-  "gardening clubs"
+// The first pass remains interest-led. When it is sparse, the second pass is
+// deliberately independent: it searches by regional community hubs and then lets
+// the base worker apply the same geographic, dance, and quality validation.
+const GROUP_REGIONAL_LENS = [
+  "community organizations Warren Ohio",
+  "historical societies Cortland Ohio",
+  "museums Garrettsville Ohio",
+  "nature conservation Middlefield Ohio",
+  "traditional crafts Burton Ohio",
+  "archaeology Chardon Ohio",
+  "volunteer groups Kent Ohio",
+  "gardening clubs Ravenna Ohio"
 ];
 
-const JOB_LENS = [
-  "maintenance",
-  "welding fabrication",
-  "mechanic technician",
-  "parks recreation",
-  "museum archaeology",
-  "warehouse material handling",
-  "grounds laborer",
-  "facility technician"
-];
-
-const EVENT_LENS = [
-  "local history",
-  "museum programs",
-  "nature conservation",
-  "traditional crafts",
-  "archaeology",
-  "community workshops",
-  "heritage events",
-  "gardening"
+const EVENT_REGIONAL_LENS = [
+  "community events Warren Ohio",
+  "history events Cortland Ohio",
+  "museum programs Garrettsville Ohio",
+  "nature events Middlefield Ohio",
+  "craft workshops Burton Ohio",
+  "archaeology events Chardon Ohio",
+  "volunteer events Kent Ohio",
+  "gardening events Ravenna Ohio"
 ];
 
 async function jsonResponse(response) {
@@ -49,10 +41,6 @@ function uniqueItems(items = []) {
   });
 }
 
-// The base worker only consumes the first eight interests. The old coverage layer
-// appended its lens after the user's interests, so a six-interest request changed
-// only two terms and often produced essentially the same search plan. A supplemental
-// pass is intentionally lens-led: it searches a different discovery vocabulary.
 function withLens(request, lens) {
   const u = new URL(request.url);
   u.searchParams.set("interests", lens.join(","));
@@ -63,9 +51,6 @@ async function adaptive(request, env, ctx, field, lens, minimum, maxPrimaryFetch
   const first = await jsonResponse(await baseWorker.fetch(request, env, ctx));
   if (!first.data || !Array.isArray(first.data[field]) || first.data[field].length >= minimum) return first.response;
 
-  // Never launch a second full worker pass when the first pass is already close to
-  // the Cloudflare subrequest ceiling. Jobs currently use much more of the budget
-  // than groups/events, so this keeps the adaptive layer safe for production.
   const primaryUsed = Number(first.data?.fetchBudget?.used ?? Infinity);
   if (primaryUsed > maxPrimaryFetches) return first.response;
 
@@ -97,18 +82,12 @@ async function adaptive(request, env, ctx, field, lens, minimum, maxPrimaryFetch
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    if (url.pathname === "/groups") return adaptive(request, env, ctx, "groups", GROUP_LENS, 6, 22);
-    if (url.pathname === "/events") return adaptive(request, env, ctx, "events", EVENT_LENS, 8, 22);
-    // Jobs normally consume ~38/44 fetches on the primary pass, so a second full
-    // pass would be unsafe. Job quality is improved in the base worker's candidate
-    // filtering rather than by doubling the fetch workload.
+    if (url.pathname === "/groups") return adaptive(request, env, ctx, "groups", GROUP_REGIONAL_LENS, 6, 22);
+    if (url.pathname === "/events") return adaptive(request, env, ctx, "events", EVENT_REGIONAL_LENS, 8, 22);
+    // Jobs use ~38/44 fetches, so a second full pass is intentionally disabled.
     if (url.pathname === "/jobs") return baseWorker.fetch(request, env, ctx);
-    if (url.pathname === "/discover") {
-      // /discover is a combined endpoint and therefore cannot safely run two full
-      // supplemental workers under the shared subrequest ceiling. Keep it on the
-      // validated primary worker; category endpoints receive adaptive coverage.
-      return baseWorker.fetch(request, env, ctx);
-    }
+    // The combined endpoint must stay within the shared subrequest ceiling.
+    if (url.pathname === "/discover") return baseWorker.fetch(request, env, ctx);
     return baseWorker.fetch(request, env, ctx);
   }
 };
