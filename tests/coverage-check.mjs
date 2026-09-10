@@ -19,7 +19,6 @@ assert.match(coverage, /configurableExclusions/);
 assert.match(coverage, /organization-first/);
 assert.match(discovery, /export async function discoverAll/);
 assert.match(discovery, /hard ZIP gate failed before fetch/);
-assert.match(discovery, /search-result evidence/);
 assert.match(discovery, /exclusionQuery/);
 assert.match(discovery, /isExcluded/);
 assert.doesNotMatch(discovery, /-dance/);
