@@ -1,8 +1,7 @@
 import baseWorker from "./index.js";
 
-// The first pass remains interest-led. When it is sparse, the second pass is
-// deliberately independent: it searches by regional community hubs and then lets
-// the base worker apply the same geographic, dance, and quality validation.
+// Regional supplemental pass: intentionally independent from the user's interest
+// vocabulary so sparse results get a genuinely different discovery surface.
 const GROUP_LENS = [
   "community organizations Warren Ohio",
   "historical societies Cortland Ohio",
