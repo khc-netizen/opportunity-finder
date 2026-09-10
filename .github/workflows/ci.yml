@@ -22,7 +22,20 @@ jobs:
       - name: Validate Worker syntax
         run: node --check worker/index.js
       - name: Validate frontend syntax
-        run: node --check <(python3 -c 'import re; s=open("public/index.html", encoding="utf-8").read(); print(re.search(r"<script>([\\s\\S]*?)</script>", s).group(1))')
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          p = Path("public/index.html")
+          s = p.read_text(encoding="utf-8")
+          scripts = re.findall(r"<script(?:\s[^>]*)?>([\s\S]*?)</script>", s, flags=re.I)
+          if not scripts:
+              raise SystemExit("No inline script found in public/index.html")
+          Path("/tmp/frontend-check.js").write_text("\n\n".join(scripts), encoding="utf-8")
+          print(f"Extracted {len(scripts)} inline script block(s)")
+          PY
+          node --check /tmp/frontend-check.js
       - name: Verify required architecture markers
         run: |
           grep -q 'architecture: "organization-first"' worker/index.js
