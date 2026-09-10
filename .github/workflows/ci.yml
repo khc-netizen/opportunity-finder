@@ -23,6 +23,12 @@ jobs:
         run: node --check worker/index.js
       - name: Validate coverage layer syntax
         run: node --check worker/coverage.js
+      - name: Validate organic discovery syntax
+        run: node --check worker/organic.js
+      - name: Validate job discovery syntax
+        run: node --check worker/job-discovery.js
+      - name: Validate ZIP geography syntax
+        run: node --check worker/zip-geo.js
       - name: Validate frontend syntax
         shell: bash
         run: |
@@ -48,3 +54,5 @@ jobs:
         run: node tests/architecture-check.mjs
       - name: Run discovery coverage checks
         run: node tests/coverage-check.mjs
+      - name: Run verified ZIP geography checks
+        run: node tests/zip-geo-check.mjs
