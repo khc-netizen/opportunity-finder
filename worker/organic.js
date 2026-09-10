@@ -10,6 +10,17 @@ const ORG_RE = /association|society|club|guild|chapter|organization|organisation
 const EVENT_RE = /event|calendar|meeting|workshop|program|programme|exhibit|exhibition|festival|fair|lecture|tour|open house|class|demo|demonstration|registration|tickets|rsvp/i;
 const LOCAL_RE = /ohio|trumbull|warren|northeast ohio|geauga|portage|ashtabula|mahoning|columbiana|summit|lake|cuyahoga/i;
 
+const ZIP_FIRST_HOME = "44439";
+const ZIP_REGION = [
+  ["44439", "Mesopotamia", 0], ["44062", "Middlefield", 5], ["44099", "Windsor", 8], ["44402", "Bristolville", 8],
+  ["44491", "West Farmington", 8], ["44450", "North Bloomfield", 9], ["44046", "Huntsburg", 10], ["44080", "Parkman", 10],
+  ["44076", "Orwell", 11], ["44021", "Burton", 12], ["44417", "Farmdale", 13], ["44410", "Cortland", 14],
+  ["44444", "Newton Falls", 15], ["44231", "Garrettsville", 17], ["44482", "Warren", 18], ["44486", "Warren", 18],
+  ["44481", "Warren", 19], ["44430", "Leavittsburg", 20], ["44234", "Hiram", 21], ["44266", "Ravenna", 23],
+  ["44024", "Chardon", 25], ["44240", "Kent", 27], ["44484", "Warren", 20], ["44485", "Warren", 20]
+];
+const ZIP_TO_CITY = Object.fromEntries(ZIP_REGION.map(([zip, city]) => [zip, city]));
+
 function clean(s) { return String(s || "").replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&quot;/gi, '"').replace(/&#39;|&#x27;/gi, "'").replace(/\s+/g, " ").trim(); }
 function host(url) { try { return new URL(url).hostname.toLowerCase(); } catch { return ""; } }
 function validUrl(url) { try { const u = new URL(url); return /^https?:$/.test(u.protocol) && !JUNK_HOST_RE.test(u.hostname) && !CONTENT_HOST_RE.test(u.hostname) && !DIAGNOSTIC_SEED_HOST_RE.test(u.hostname); } catch { return false; } }
@@ -23,23 +34,15 @@ function unwrapSearchUrl(url) {
     const encoded = u.searchParams.get("u") || "";
     if (!encoded) return url;
     const payload = encoded.startsWith("a1") ? encoded.slice(2) : encoded;
-    try {
-      const decoded = atob(payload.replace(/-/g, "+").replace(/_/g, "/"));
-      if (/^https?:\/\//i.test(decoded)) return decoded;
-    } catch {}
+    try { const decoded = atob(payload.replace(/-/g, "+").replace(/_/g, "/")); if (/^https?:\/\//i.test(decoded)) return decoded; } catch {}
     return url;
   } catch { return url; }
 }
 function extractLinks(html, base) {
-  const out = [];
-  const re = /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
-  let m;
+  const out = []; const re = /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi; let m;
   while ((m = re.exec(html)) && out.length < 20) {
-    const rawUrl = absolute(decodeHref(m[1]), base);
-    const url = unwrapSearchUrl(rawUrl);
-    const text = clean(m[2]);
-    if (!validUrl(url) || !text) continue;
-    if (NOISE_RE.test(`${text} ${url}`)) continue;
+    const rawUrl = absolute(decodeHref(m[1]), base); const url = unwrapSearchUrl(rawUrl); const text = clean(m[2]);
+    if (!validUrl(url) || !text || NOISE_RE.test(`${text} ${url}`)) continue;
     if (!out.some(x => key(x.url) === key(url))) out.push({ url, text });
   }
   return out;
@@ -47,107 +50,52 @@ function extractLinks(html, base) {
 function titleFrom(html, fallback) { const m = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i); return clean(m ? m[1] : fallback); }
 function meta(html, name) { const re = new RegExp(`<meta[^>]+(?:name|property)=["']${name}["'][^>]+content=["']([^"']*)["']`, "i"); const m = html.match(re); return clean(m ? m[1] : ""); }
 function interestTerms(interests) { return (interests.length ? interests : DEFAULT_INTERESTS).flatMap(x => String(x).split(/[,;]+/).map(y => y.trim()).filter(Boolean)); }
-function querySet(interests, city, state) {
-  const terms = interestTerms(interests);
-  const places = [`"${city}" "${state}"`, `"Trumbull County" Ohio`, `"Warren" Ohio`, `"Northeast Ohio"`, `"Geauga County" Ohio`, `"Portage County" Ohio`, `"Ashtabula County" Ohio`, `"Mahoning County" Ohio`];
+function zipTerms(radius) { return ZIP_REGION.filter(x => x[2] <= Number(radius || 75)).map(([zip, city]) => ({ zip, city })); }
+function querySet(interests, city, state, radius) {
+  const terms = interestTerms(interests); const zips = zipTerms(radius);
+  const places = zips.slice(0, 12).map(({ zip, city: zipCity }) => `"${zip}" "${zipCity}" ${state}`);
+  if (!places.length) places.push(`"${city}" "${state}"`);
   const queries = [];
   const selectedTerms = terms.slice(0, 8);
   for (let i = 0; i < selectedTerms.length && queries.length < 12; i++) {
-    const term = selectedTerms[i];
     const place = places[i % places.length];
-    queries.push(`${place} "${term}" (${GROUP_TYPES.slice(0, 8).join(" OR ")}) -dance -"ancient Mesopotamia" -"Mesopotamian"`);
+    queries.push(`${place} "${selectedTerms[i]}" (${GROUP_TYPES.slice(0, 8).join(" OR ")}) -dance -"ancient Mesopotamia" -"Mesopotamian"`);
   }
   for (let i = 0; i < Math.min(selectedTerms.length, places.length) && queries.length < 12; i++) {
-    const term = selectedTerms[(i + 3) % selectedTerms.length];
-    const place = places[(i + 3) % places.length];
+    const term = selectedTerms[(i + 3) % selectedTerms.length]; const place = places[(i + 3) % places.length];
     const q = `${place} "${term}" organization Ohio -dance -"ancient Mesopotamia" -"Mesopotamian"`;
     if (!queries.includes(q)) queries.push(q);
   }
   return queries;
 }
 async function search(query, budget) {
-  if (budget.used >= budget.limit) return { urls: [], error: "fetch budget exhausted" };
-  budget.used++;
-  try {
-    const u = new URL("https://www.bing.com/search"); u.searchParams.set("q", query); u.searchParams.set("count", "10");
-    const r = await fetch(u.href, { redirect: "follow", headers: { "User-Agent": "Opportunity-Finder/3.11-organic", Accept: "text/html,application/xhtml+xml" } });
-    const html = await r.text();
-    if (!r.ok) return { urls: [], status: r.status };
-    return { urls: extractLinks(html, u.href), status: r.status };
-  } catch (e) { return { urls: [], error: String(e?.message || e) }; }
+  if (budget.used >= budget.limit) return { urls: [], error: "fetch budget exhausted" }; budget.used++;
+  try { const u = new URL("https://www.bing.com/search"); u.searchParams.set("q", query); u.searchParams.set("count", "10"); const r = await fetch(u.href, { redirect: "follow", headers: { "User-Agent": "Opportunity-Finder/3.11-organic", Accept: "text/html,application/xhtml+xml" } }); const html = await r.text(); if (!r.ok) return { urls: [], status: r.status }; return { urls: extractLinks(html, u.href), status: r.status }; }
+  catch (e) { return { urls: [], error: String(e?.message || e) }; }
 }
 async function fetchPage(url, budget) {
-  if (budget.used >= budget.limit) return null;
-  budget.used++;
-  try {
-    const r = await fetch(url, { redirect: "follow", headers: { "User-Agent": "Opportunity-Finder/3.11-organic", Accept: "text/html,application/xhtml+xml" } });
-    if (!r.ok) return null;
-    const html = await r.text();
-    return { url: r.url || url, html, title: titleFrom(html, url), description: meta(html, "description") || meta(html, "og:description") };
-  } catch { return null; }
+  if (budget.used >= budget.limit) return null; budget.used++;
+  try { const r = await fetch(url, { redirect: "follow", headers: { "User-Agent": "Opportunity-Finder/3.11-organic", Accept: "text/html,application/xhtml+xml" } }); if (!r.ok) return null; const html = await r.text(); return { url: r.url || url, html, title: titleFrom(html, url), description: meta(html, "description") || meta(html, "og:description") }; }
+  catch { return null; }
 }
-function scoreCandidate(c, interests, city, state) {
-  const text = `${c.text} ${c.url}`.toLowerCase(); let score = 0;
-  if (ORG_RE.test(text)) score += 25;
-  if (LOCAL_RE.test(text)) score += 18;
-  if (city && text.includes(city.toLowerCase())) score += 12;
-  if (state && text.includes(state.toLowerCase())) score += 8;
-  for (const term of interestTerms(interests)) if (text.includes(term.toLowerCase())) score += 10;
-  if (DANCE_RE.test(text)) score -= 100;
-  if (NOISE_RE.test(text)) score -= 100;
-  return score;
+function scoreCandidate(c, interests, city, state) { const text = `${c.text} ${c.url}`.toLowerCase(); let score = 0; if (ORG_RE.test(text)) score += 25; if (LOCAL_RE.test(text)) score += 18; if (city && text.includes(city.toLowerCase())) score += 12; if (state && text.includes(state.toLowerCase())) score += 8; for (const term of interestTerms(interests)) if (text.includes(term.toLowerCase())) score += 10; if (/\b\d{5}\b/.test(text)) score += 6; if (DANCE_RE.test(text)) score -= 100; if (NOISE_RE.test(text)) score -= 100; return score; }
+function isOrganization(page, interests, city, state) { const text = `${page.title} ${page.description} ${page.html.slice(0, 50000)}`; if (DANCE_RE.test(text) || NOISE_RE.test(text)) return false; if (DIAGNOSTIC_SEED_HOST_RE.test(host(page.url))) return false; const local = LOCAL_RE.test(text) || text.toLowerCase().includes(city.toLowerCase()) || /\b44\d{3}\b|\b40\d{3}\b|\b41\d{3}\b|\b42\d{3}\b/.test(text); const org = ORG_RE.test(text) || interestTerms(interests).some(x => text.toLowerCase().includes(x.toLowerCase())); return local && org; }
+function locationFromPage(page, fallbackCity, fallbackState) {
+  const text = clean(`${page.title} ${page.description} ${page.html.slice(0, 30000)}`);
+  const zips = [...text.matchAll(/\b(\d{5})(?:-\d{4})?\b/g)].map(m => m[1]);
+  const zip = zips.find(z => ZIP_TO_CITY[z]) || "";
+  const city = zip ? ZIP_TO_CITY[zip] : fallbackCity;
+  return { city, state: fallbackState, zip };
 }
-function isOrganization(page, interests, city, state) {
-  const text = `${page.title} ${page.description} ${page.html.slice(0, 50000)}`;
-  if (DANCE_RE.test(text) || NOISE_RE.test(text)) return false;
-  if (DIAGNOSTIC_SEED_HOST_RE.test(host(page.url))) return false;
-  const local = LOCAL_RE.test(text) || text.toLowerCase().includes(city.toLowerCase());
-  const org = ORG_RE.test(text) || interestTerms(interests).some(x => text.toLowerCase().includes(x.toLowerCase()));
-  return local && org;
-}
-function makeGroup(page, interests, city, state) {
-  const text = clean(page.html.slice(0, 12000));
-  const description = page.description || text.slice(0, 300);
-  return { title: page.title || host(page.url), name: page.title || host(page.url), url: page.url, link: page.url, description, location: `${city}, ${state}`, source: "organic-search", discoverySource: "organic-search", relevance: scoreCandidate({ text: `${page.title} ${page.description}`, url: page.url }, interests, city, state) };
-}
-function eventLinks(page) {
-  return extractLinks(page.html, page.url).filter(x => EVENT_RE.test(`${x.text} ${x.url}`)).slice(0, 4);
-}
-async function discoverGroups(interests, city, state, budget) {
+function makeGroup(page, interests, city, state) { const text = clean(page.html.slice(0, 12000)); const description = page.description || text.slice(0, 300); const loc = locationFromPage(page, city, state); return { title: page.title || host(page.url), name: page.title || host(page.url), url: page.url, link: page.url, description, location: `${loc.city}, ${loc.state}${loc.zip ? ` ${loc.zip}` : ""}`, city: loc.city, state: loc.state, zip: loc.zip, source: "organic-search", discoverySource: "organic-search", relevance: scoreCandidate({ text: `${page.title} ${page.description}`, url: page.url }, interests, city, state) }; }
+function eventLinks(page) { return extractLinks(page.html, page.url).filter(x => EVENT_RE.test(`${x.text} ${x.url}`)).slice(0, 4); }
+async function discoverGroups(interests, city, state, radius) { const diagnostics = []; const candidates = new Map(); const budget = radius.__budget || null; }
+async function discoverGroupsImpl(interests, city, state, budget, radius) {
   const diagnostics = []; const candidates = new Map();
-  for (const query of querySet(interests, city, state)) {
-    const r = await search(query, budget); diagnostics.push({ stage: "organic-group-search", query, candidates: r.urls.length, status: r.status || 0, error: r.error || null });
-    for (const c of r.urls) { if (scoreCandidate(c, interests, city, state) <= 0) continue; candidates.set(key(c.url), c); }
-    if (budget.used >= budget.limit) break;
-  }
-  const ranked = [...candidates.values()].sort((a, b) => scoreCandidate(b, interests, city, state) - scoreCandidate(a, interests, city, state)).slice(0, 12);
-  const groups = [];
-  for (const candidate of ranked) {
-    const page = await fetchPage(candidate.url, budget); if (!page || !isOrganization(page, interests, city, state)) continue;
-    const item = makeGroup(page, interests, city, state);
-    if (!groups.some(x => host(x.url) === host(item.url))) groups.push(item);
-    if (groups.length >= 8 || budget.used >= budget.limit) break;
-  }
+  for (const query of querySet(interests, city, state, radius)) { const r = await search(query, budget); diagnostics.push({ stage: "organic-group-search", query, candidates: r.urls.length, status: r.status || 0, error: r.error || null }); for (const c of r.urls) { if (scoreCandidate(c, interests, city, state) <= 0) continue; candidates.set(key(c.url), c); } if (budget.used >= budget.limit) break; }
+  const ranked = [...candidates.values()].sort((a, b) => scoreCandidate(b, interests, city, state) - scoreCandidate(a, interests, city, state)).slice(0, 12); const groups = [];
+  for (const candidate of ranked) { const page = await fetchPage(candidate.url, budget); if (!page || !isOrganization(page, interests, city, state)) continue; const item = makeGroup(page, interests, city, state); if (!groups.some(x => host(x.url) === host(item.url))) groups.push(item); if (groups.length >= 8 || budget.used >= budget.limit) break; }
   return { groups, diagnostics, candidateCount: candidates.size };
 }
-async function discoverEvents(groups, interests, city, state, budget) {
-  const events = []; const diagnostics = [];
-  for (const group of groups.slice(0, 8)) {
-    const page = await fetchPage(group.url, budget); if (!page) continue;
-    const links = eventLinks(page);
-    diagnostics.push({ stage: "organic-event-links", organization: group.title, candidates: links.length });
-    for (const link of links) {
-      if (DANCE_RE.test(`${link.text} ${link.url}`) || NOISE_RE.test(`${link.text} ${link.url}`)) continue;
-      events.push({ title: link.text, name: link.text, url: link.url, link: link.url, organization: group.title, location: `${city}, ${state}`, source: "organic-organization-site", description: `Discovered from ${group.title}` });
-      if (events.length >= 8) return { events, diagnostics };
-    }
-    if (budget.used >= budget.limit) break;
-  }
-  return { events, diagnostics };
-}
-export async function organicDiscover(interests, city, state, radius = 75) {
-  const budget = { used: 0, limit: 44 }; const started = Date.now();
-  const groupResult = await discoverGroups(interests, city, state, budget);
-  const eventResult = await discoverEvents(groupResult.groups, interests, city, state, budget);
-  return { ok: true, version: "3.11.5", build: "v3.11.5-search-url-fix", groups: groupResult.groups, events: eventResult.events, jobs: [], fetchBudget: { used: budget.used, limit: budget.limit }, coverage: { radius, organicGroups: groupResult.groups.length, organicEvents: eventResult.events.length, candidateCount: groupResult.candidateCount }, diagnostics: [...groupResult.diagnostics, ...eventResult.diagnostics], durationMs: Date.now() - started };
-}
+async function discoverEvents(groups, interests, city, state, budget) { const events = []; const diagnostics = []; for (const group of groups.slice(0, 8)) { const page = await fetchPage(group.url, budget); if (!page) continue; const links = eventLinks(page); diagnostics.push({ stage: "organic-event-links", organization: group.title, candidates: links.length }); for (const link of links) { if (DANCE_RE.test(`${link.text} ${link.url}`) || NOISE_RE.test(`${link.text} ${link.url}`)) continue; const loc = group.zip ? `${group.city}, ${group.state} ${group.zip}` : `${city}, ${state}`; events.push({ title: link.text, name: link.text, url: link.url, link: link.url, organization: group.title, location: loc, city: group.city || city, state: group.state || state, zip: group.zip || "", source: "organic-organization-site", description: `Discovered from ${group.title}` }); if (events.length >= 8) return { events, diagnostics }; } if (budget.used >= budget.limit) break; } return { events, diagnostics }; }
+export async function organicDiscover(interests, city, state, radius = 75) { const budget = { used: 0, limit: 44 }; const started = Date.now(); const groupResult = await discoverGroupsImpl(interests, city, state, budget, radius); const eventResult = await discoverEvents(groupResult.groups, interests, city, state, budget); return { ok: true, version: "3.11.7", build: "v3.11.7-zip-first", groups: groupResult.groups, events: eventResult.events, jobs: [], fetchBudget: { used: budget.used, limit: budget.limit }, coverage: { radius, homeZip: ZIP_FIRST_HOME, zipFirst: true, searchedZips: zipTerms(radius).map(x => x[0]), organicGroups: groupResult.groups.length, organicEvents: eventResult.events.length, candidateCount: groupResult.candidateCount }, diagnostics: [...groupResult.diagnostics, ...eventResult.diagnostics], durationMs: Date.now() - started }; }
