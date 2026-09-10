@@ -1,9 +1,9 @@
 import baseWorker from './index.js';
 import { organicDiscover } from './organic.js';
 
-const RELEASE = '3.11.6';
-const RELEASE_BUILD = 'v3.11.6-prefetch-state-guard';
-const RELEASE_FINGERPRINT = 'prefetch-state-guard-2026-09-10';
+const RELEASE = '3.11.7';
+const RELEASE_BUILD = 'v3.11.7-zip-first';
+const RELEASE_FINGERPRINT = 'zip-first-44439-2026-09-10';
 const GROUP_LENS = ['community organizations Warren Ohio','historical societies Cortland Ohio','museums Garrettsville Ohio','nature conservation Middlefield Ohio','traditional crafts Burton Ohio','archaeology Chardon Ohio','volunteer groups Kent Ohio','gardening clubs Ravenna Ohio'];
 const JOB_LENS = ['maintenance','welding fabrication','mechanic technician','parks recreation','museum archaeology','warehouse material handling','grounds laborer','facility technician'];
 const EVENT_LENS = ['community events Warren Ohio','history events Cortland Ohio','museum programs Garrettsville Ohio','nature events Middlefield Ohio','craft workshops Burton Ohio','archaeology events Chardon Ohio','volunteer events Kent Ohio','gardening events Ravenna Ohio'];
@@ -13,31 +13,13 @@ const DIAGNOSTIC_SEEDS = [
   { name: 'Century Village Museum', url: 'https://centuryvillagemuseum.org/' }
 ];
 
-function cleanUrlText(value) { return String(value || '').toLowerCase().replace(/https?:\/\//g, '').replace(/[^a-z0-9]+/g, ' ').trim(); }
-function explicitOutsideStateUrl(value) {
-  const t = cleanUrlText(value);
-  const outside = '(?:al|ak|az|ar|ca|co|ct|de|fl|ga|hi|id|il|in|ia|ks|ky|la|me|md|ma|mi|mn|ms|mo|mt|ne|nv|nh|nj|nm|ny|nc|nd|ok|or|pa|ri|sc|sd|tn|tx|ut|vt|va|wa|wv|wi|wy|alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new hampshire|new jersey|new mexico|new york|north carolina|north dakota|oklahoma|oregon|pennsylvania|rhode island|south carolina|south dakota|tennessee|texas|utah|vermont|virginia|washington|west virginia|wisconsin|wyoming)';
-  return new RegExp('\\b[a-z]+(?:\\s+[a-z]+){0,4}\\s+' + outside + '\\b', 'i').test(t);
-}
-const nativeFetch = globalThis.fetch.bind(globalThis);
-globalThis.fetch = async function opportunityFinderPrefetchGuard(input, init) {
-  const target = typeof input === 'string' ? input : input?.url || String(input || '');
-  if (explicitOutsideStateUrl(target)) {
-    return new Response(JSON.stringify({ blocked: true, reason: 'explicit out-of-state URL blocked before network fetch', url: target }), {
-      status: 451,
-      headers: { 'Content-Type': 'application/json; charset=utf-8', 'X-Opportunity-Finder-Prefetch-Blocked': 'out-of-state' }
-    });
-  }
-  return nativeFetch(input, init);
-};
-
 async function jsonResponse(response) { const text = await response.text(); try { return { response, data: JSON.parse(text) }; } catch { return { response, data: null }; } }
-function requestParams(request) { const u = new URL(request.url); const interests = String(u.searchParams.get('interests') || '').split(',').map(x => x.trim()).filter(Boolean); const city = u.searchParams.get('city') || 'Mesopotamia'; const state = u.searchParams.get('state') || 'OH'; const radius = Number(u.searchParams.get('radius') || 75); return { interests, city, state, radius }; }
+function requestParams(request) { const u = new URL(request.url); const interests = String(u.searchParams.get('interests') || '').split(',').map(x => x.trim()).filter(Boolean); const city = u.searchParams.get('city') || 'Mesopotamia'; const state = u.searchParams.get('state') || 'OH'; const radius = Number(u.searchParams.get('radius') || 30); const zip = u.searchParams.get('zip') || '44439'; return { interests, city, state, radius, zip }; }
 function release(data) { return { ...data, deployment: { version: RELEASE, build: RELEASE_BUILD, fingerprint: RELEASE_FINGERPRINT, entrypoint: 'worker/coverage.js' } }; }
 function uniqueItems(items = []) { const seen = new Set(); return items.filter(item => { const key = `${String(item?.title || item?.name || '').toLowerCase()}|${String(item?.url || item?.link || '').toLowerCase()}`; if (seen.has(key)) return false; seen.add(key); return true; }); }
 function fallbackItem(item) { return { ...item, discoverySource: 'seed-fallback' }; }
 
-async function jobsFor(request, env, ctx) { const u = new URL(request.url); u.pathname = '/jobs'; return jsonResponse(await baseWorker.fetch(new Request(u, request), env, ctx)); }
+async function jobsFor(request, env, ctx) { const u = new URL(request.url); const p = requestParams(request); const existing = String(u.searchParams.get('interests') || '').split(',').map(x => x.trim()).filter(Boolean); const zipFirstInterests = [p.zip, ...existing.filter(x => x !== p.zip)]; u.searchParams.set('interests', zipFirstInterests.join(',')); u.pathname = '/jobs'; return jsonResponse(await baseWorker.fetch(new Request(u, request), env, ctx)); }
 
 async function discovery(request, env, ctx) {
   const p = requestParams(request);
@@ -55,7 +37,7 @@ async function discovery(request, env, ctx) {
       fallbackDiagnostics = base.data.diagnostics || base.data.coverage || null;
     }
   }
-  return release({ ok: true, version: RELEASE, build: RELEASE_BUILD, architecture: 'organization-first / organic-first with explicit seed fallback', groups, events, jobs: jobs.data?.jobs || [], items: groups, fetchBudget: { organic: organic.fetchBudget, jobs: jobs.data?.fetchBudget || null }, coverage: { ...(organic.coverage || {}), adaptiveLens: true, GROUP_LENS, EVENT_LENS, JOB_LENS, seedFallbackUsed, fallbackDiagnostics, organicResults: { groups: organic.groups.length, events: organic.events.length } } });
+  return release({ ok: true, version: RELEASE, build: RELEASE_BUILD, architecture: 'organization-first / organic-first with explicit seed fallback', groups, events, jobs: jobs.data?.jobs || [], items: groups, fetchBudget: { organic: organic.fetchBudget, jobs: jobs.data?.fetchBudget || null }, coverage: { ...(organic.coverage || {}), adaptiveLens: true, GROUP_LENS, EVENT_LENS, JOB_LENS, seedFallbackUsed, fallbackDiagnostics, organicResults: { groups: organic.groups.length, events: organic.events.length } });
 }
 
 async function diagnostic(request, env, ctx) {
