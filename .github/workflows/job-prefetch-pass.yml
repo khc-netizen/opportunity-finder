@@ -1,0 +1,61 @@
+name: Job Prefetch Pass
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Tighten job prefetch gate
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('worker/index.js')
+          s=p.read_text()
+          marker='function worthwhileJobCandidate(c, state) {'
+          if marker not in s: raise SystemExit('helper not found')
+          start=s.index(marker); brace=s.index('{',start); depth=0; end=None
+          for i in range(brace,len(s)):
+              if s[i]=='{': depth+=1
+              elif s[i]=='}':
+                  depth-=1
+                  if depth==0: end=i+1; break
+          if end is None: raise SystemExit('helper end not found')
+          helper='''function worthwhileJobCandidate(c, state) {
+  const rawUrl = String(c?.url || "");
+  const urlText = norm(rawUrl);
+  if (SEARCH_NOISE_RE.test(urlText) || GENERIC_CONTENT_PATH_RE.test(rawUrl)) return false;
+  if (JOB_REFERENCE_RE.test(urlText)) return false;
+  if (JOB_JUNK_HOST_RE.test(host(rawUrl))) return false;
+  if (!acceptDiscoveryUrl(rawUrl, state)) return false;
+  // Prefetch only pages whose URL itself points toward a hiring surface. Search-query
+  // terms are deliberately excluded here because every job query contains "jobs" and
+  // occupational words; using them would let educational/reference pages through.
+  const pathSignal = /(?:\\bjobs?\\b|\\bcareers?\\b|\\bemployment\\b|\\bhiring\\b|\\brecruit(?:ment|ing)?\\b|\\bapply\\b|\\bapplication\\b|\\bopenings?\\b|\\bvacanc(?:y|ies)\\b|\\bpositions?\\b|\\bwork[-_ ]?with[-_ ]?(?:us|me)\\b|\\bjoin[-_ ]?(?:our|the)[-_ ]?team\\b|\\bopportunit(?:y|ies)\\b)/i.test(urlText);
+  return CAREER_RE.test(urlText) || pathSignal;
+}'''
+          s=s[:start]+helper+s[end:]
+          p.write_text(s)
+          PY
+      - name: Validate Worker
+        run: node --check worker/index.js
+      - name: Verify gate
+        run: grep -q 'Prefetch only pages' worker/index.js
+      - name: Commit and clean up
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add worker/index.js
+          git commit -m 'Require job-like URL paths before prefetch' || true
+          git rm .github/workflows/job-prefetch-pass.yml
+          git commit -m 'Remove one-time job prefetch workflow'
+          git push origin HEAD:main
