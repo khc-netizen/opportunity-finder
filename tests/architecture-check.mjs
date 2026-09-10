@@ -4,7 +4,6 @@ import assert from "node:assert/strict";
 const worker = readFileSync("worker/index.js", "utf8");
 const frontend = readFileSync("public/index.html", "utf8");
 
-// Backend architecture invariants.
 assert.match(worker, /architecture:\s*['\"]organization-first['\"]/);
 assert.match(worker, /const DANCE_RE/);
 assert.match(worker, /const AMISH_RE/);
@@ -14,7 +13,6 @@ assert.match(worker, /parseOrganizationPage\(/);
 assert.match(worker, /parseEvents\(/);
 assert.match(worker, /fetchBudget/);
 
-// Required discovery stages must remain organization-first.
 const discoveryStart = worker.indexOf("async function discover(");
 const orgStage = worker.indexOf("Stage 1: discover organizations first", discoveryStart);
 const venueStage = worker.indexOf("Stage 2: venues", discoveryStart);
@@ -23,7 +21,6 @@ assert.ok(discoveryStart >= 0 && orgStage > discoveryStart);
 assert.ok(venueStage > orgStage);
 assert.ok(eventStage > venueStage);
 
-// Frontend recovery/filtering invariants.
 assert.match(frontend, /opportunityFinder:notInterested:v1/);
 assert.match(frontend, /Not interested/);
 assert.match(frontend, /Restore/);
