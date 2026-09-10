@@ -1,7 +1,7 @@
 name = "opportunity-finder-v2"
-main = "worker/index.js"
+main = "worker/coverage.js"
 compatibility_date = "2026-09-07"
-# 3.9.3 validated worker deployment trigger
+# Adaptive discovery coverage layer delegates to the validated organization-first worker.
 
 [assets]
 directory = "./public"
