@@ -37,7 +37,7 @@ async function discovery(request, env, ctx) {
       fallbackDiagnostics = base.data.diagnostics || base.data.coverage || null;
     }
   }
-  return release({ ok: true, version: RELEASE, build: RELEASE_BUILD, architecture: 'organization-first / organic-first with explicit seed fallback', groups, events, jobs: jobs.data?.jobs || [], items: groups, fetchBudget: { organic: organic.fetchBudget, jobs: jobs.data?.fetchBudget || null }, coverage: { ...(organic.coverage || {}), adaptiveLens: true, GROUP_LENS, EVENT_LENS, JOB_LENS, seedFallbackUsed, fallbackDiagnostics, organicResults: { groups: organic.groups.length, events: organic.events.length } });
+  return release({ ok: true, version: RELEASE, build: RELEASE_BUILD, architecture: 'organization-first / organic-first with explicit seed fallback', groups, events, jobs: jobs.data?.jobs || [], items: groups, fetchBudget: { organic: organic.fetchBudget, jobs: jobs.data?.fetchBudget || null }, coverage: { ...(organic.coverage || {}), adaptiveLens: true, GROUP_LENS, EVENT_LENS, JOB_LENS, seedFallbackUsed, fallbackDiagnostics, organicResults: { groups: organic.groups.length, events: organic.events.length } } });
 }
 
 async function diagnostic(request, env, ctx) {
