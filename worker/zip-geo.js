@@ -41,14 +41,19 @@ function hasOhioEvidence(text) { return /\b(?:ohio|oh)\b/i.test(String(text||'')
 function resolveEvidence(text,radius=30) {
   const explicit=zipEvidence(text,radius).filter(x=>x.allowed);
   if(explicit.length)return explicit;
-  // City names alone are not sufficient geographic evidence. A city such as
-  // Burton or Orwell is shared by places outside Ohio, and search engines can
-  // return unrelated pages with those words. City-only mapping is therefore
-  // accepted only when the candidate also contains explicit Ohio evidence.
   return hasOhioEvidence(text) ? cityEvidence(text,radius) : [];
 }
 function passesHardZipGate(text,radius=30) { return resolveEvidence(text,radius).length>0; }
 function bestLocation(text,radius=30) { return resolveEvidence(text,radius).sort((a,b)=>a.distance-b.distance)[0]||null; }
-function enrichLocation(item,radius=30) { const best=bestLocation(`${item?.zip||''} ${item?.location||''} ${item?.address||''} ${item?.description||''} ${item?.url||''}`,radius); if(!best)return null; return {...item,zip:best.zip,city:item.city||best.city,state:item.state||'OH',distance:best.distance,distanceMiles:best.distance,location:`${item.city||best.city}, ${item.state||'OH'} ${best.zip}`}; }
+
+// Cast-iron physical-address validation. A ZIP/city mention is never enough for
+// a production result. We require a street number + street type + Ohio + ZIP.
+// P.O. boxes and city-only locations intentionally do not qualify.
+const STREET_TYPE_RE='(?:street|st|road|rd|avenue|ave|drive|dr|lane|ln|boulevard|blvd|highway|hwy|parkway|pkwy|circle|cir|court|ct|trail|trl|way|place|pl|terrace|ter|route|rte)';
+const PHYSICAL_ADDRESS_RE=new RegExp(`\\b\\d{1,6}\\s+[A-Za-z0-9.'#&-]+(?:\\s+[A-Za-z0-9.'#&-]+){0,6}\\s+${STREET_TYPE_RE}\\b[^\\n]{0,100}?,?\\s+[A-Za-z .'-]+,?\\s+OH(?:IO)?\\s+\\d{5}(?:-\\d{4})?\\b`,'i');
+function extractPhysicalAddresses(text) { const source=String(text||'').replace(/<[^>]+>/g,' '); return source.match(PHYSICAL_ADDRESS_RE)||[]; }
+function hasPhysicalAddress(text) { return extractPhysicalAddresses(text).length>0; }
+function passesHardAddressGate(text,radius=30) { const t=String(text||''); return hasPhysicalAddress(t) && passesHardZipGate(t,radius); }
+function enrichLocation(item,radius=30) { const source=`${item?.address||''} ${item?.location||''} ${item?.description||''} ${item?.url||''}`; if(!passesHardAddressGate(source,radius))return null; const best=bestLocation(source,radius); if(!best)return null; return {...item,zip:best.zip,city:item.city||best.city,state:item.state||'OH',distance:best.distance,distanceMiles:best.distance,location:`${item.city||best.city}, ${item.state||'OH'} ${best.zip}`}; }
 function passesZipGate(value,radius){return passesHardZipGate(value,radius);}
-export { HOME_ZIP, HOME_COORDS, ZIP_REGION, ZIP_SET, ZIP_TO_CITY, CITY_TO_ZIPS, eligibleZips, distanceForZip, isAllowedZip, extractZips, zipEvidence, cityEvidence, resolveEvidence, bestLocation, passesHardZipGate, passesZipGate, enrichLocation, normalizeZip };
+export { HOME_ZIP, HOME_COORDS, ZIP_REGION, ZIP_SET, ZIP_TO_CITY, CITY_TO_ZIPS, eligibleZips, distanceForZip, isAllowedZip, extractZips, zipEvidence, cityEvidence, resolveEvidence, bestLocation, passesHardZipGate, passesHardAddressGate, hasPhysicalAddress, extractPhysicalAddresses, passesZipGate, enrichLocation, normalizeZip };
