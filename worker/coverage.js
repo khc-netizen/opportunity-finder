@@ -1,5 +1,5 @@
 import baseWorker from './index.js';
-import { discoverAll } from './discovery-organic.js';
+import { discoverAll } from './discovery-v2.js';
 import { diagnoseKnownLocalSources } from './discovery-anchors.js';
 import { HOME_ZIP, eligibleZips } from './zip-geo.js';
 
