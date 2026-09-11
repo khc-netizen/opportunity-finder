@@ -37,7 +37,16 @@ function extractZips(text) { return [...String(text||'').matchAll(/\b(\d{5})(?:-
 function escapeRegExp(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); }
 function cityEvidence(text,radius=30) { const t=String(text||'').toLowerCase(),found=[]; for(const [city,zips] of Object.entries(CITY_TO_ZIPS)) if(new RegExp(`\\b${escapeRegExp(city)}\\b`,'i').test(t)) for(const zip of zips){const distance=distanceForZip(zip);if(distance!==null&&distance<=Number(radius))found.push({zip,city:ZIP_TO_CITY[zip],distance,source:'city-map'});} return found; }
 function zipEvidence(text,radius=30) { return extractZips(text).map(zip=>{const distance=distanceForZip(zip);return{zip,city:ZIP_TO_CITY[zip]||'',distance,allowed:isAllowedZip(zip,radius),source:'explicit-zip'};}); }
-function resolveEvidence(text,radius=30) { const explicit=zipEvidence(text,radius).filter(x=>x.allowed); return explicit.length?explicit:cityEvidence(text,radius); }
+function hasOhioEvidence(text) { return /\b(?:ohio|oh)\b/i.test(String(text||'')); }
+function resolveEvidence(text,radius=30) {
+  const explicit=zipEvidence(text,radius).filter(x=>x.allowed);
+  if(explicit.length)return explicit;
+  // City names alone are not sufficient geographic evidence. A city such as
+  // Burton or Orwell is shared by places outside Ohio, and search engines can
+  // return unrelated pages with those words. City-only mapping is therefore
+  // accepted only when the candidate also contains explicit Ohio evidence.
+  return hasOhioEvidence(text) ? cityEvidence(text,radius) : [];
+}
 function passesHardZipGate(text,radius=30) { return resolveEvidence(text,radius).length>0; }
 function bestLocation(text,radius=30) { return resolveEvidence(text,radius).sort((a,b)=>a.distance-b.distance)[0]||null; }
 function enrichLocation(item,radius=30) { const best=bestLocation(`${item?.zip||''} ${item?.location||''} ${item?.address||''} ${item?.description||''} ${item?.url||''}`,radius); if(!best)return null; return {...item,zip:best.zip,city:item.city||best.city,state:item.state||'OH',distance:best.distance,distanceMiles:best.distance,location:`${item.city||best.city}, ${item.state||'OH'} ${best.zip}`}; }
