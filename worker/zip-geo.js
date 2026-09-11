@@ -46,8 +46,7 @@ function hasPhysicalAddress(text) { return extractPhysicalAddresses(text).length
 function passesHardAddressGate(text,radius=30) { const t=String(text||''); return hasPhysicalAddress(t) && resolveEvidence(t,radius).length>0; }
 // The discovery engine uses this as its prefetch gate. Search-result candidates
 // may have reliable ZIP/Ohio evidence but no street address in the snippet.
-// The strict physical-address requirement is enforced again by enrichLocation()
-// immediately before any result is exposed by coverage.js.
+// Page-level validation becomes strict because page HTML is available there.
 function passesHardZipGate(text,radius=30) {
   const t=String(text||'');
   if(passesHardAddressGate(t,radius)) return true;
@@ -56,7 +55,12 @@ function passesHardZipGate(text,radius=30) {
   return passesZipProximityGate(t,radius);
 }
 function passesZipProximityGate(text,radius=30) { return resolveEvidence(text,radius).length>0; }
-function bestLocation(text,radius=30) { return resolveEvidence(text,radius).sort((a,b)=>a.distance-b.distance)[0]||null; }
+function bestLocation(text,radius=30) {
+  const t=String(text||'');
+  const pageLike=/<(?:html|body|main|article|script|address)\b/i.test(t)||t.length>5000;
+  if(pageLike&&!passesHardAddressGate(t,radius)) return null;
+  return resolveEvidence(t,radius).sort((a,b)=>a.distance-b.distance)[0]||null;
+}
 function enrichLocation(item,radius=30) { const source=`${item?.address||''} ${item?.location||''} ${item?.description||''} ${item?.url||''}`; if(!passesHardAddressGate(source,radius))return null; const best=bestLocation(source,radius); if(!best)return null; return {...item,zip:best.zip,city:item.city||best.city,state:item.state||'OH',distance:best.distance,distanceMiles:best.distance,location:`${item.city||best.city}, ${item.state||'OH'} ${best.zip}`}; }
 function passesZipGate(value,radius){return passesHardZipGate(value,radius);}
 export { HOME_ZIP, HOME_COORDS, ZIP_REGION, ZIP_SET, ZIP_TO_CITY, CITY_TO_ZIPS, eligibleZips, distanceForZip, isAllowedZip, extractZips, zipEvidence, cityEvidence, resolveEvidence, bestLocation, passesHardZipGate, passesHardAddressGate, passesZipProximityGate, hasPhysicalAddress, extractPhysicalAddresses, passesZipGate, enrichLocation, normalizeZip };
