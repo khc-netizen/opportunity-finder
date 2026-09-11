@@ -23,7 +23,7 @@ jobs:
         run: node --check worker/index.js
       - name: Validate coverage layer syntax
         run: node --check worker/coverage.js
-      - name: Validate trusted local anchors syntax
+      - name: Validate diagnostic local anchors syntax
         run: node --check worker/discovery-anchors.js
       - name: Validate active discovery engine syntax
         run: node --check worker/discovery-v2.js && node --check worker/exclusions.js
@@ -70,13 +70,18 @@ jobs:
             throw new Error('Active discovery-v2 exclusion hooks are missing');
           }
           NODE
-      - name: Validate trusted local event anchors
+      - name: Validate diagnostic local event fixtures
         run: |
           grep -q 'wraba.com/see_what_we_do/century_village_demos' worker/discovery-anchors.js
           grep -q 'centuryvillagemuseum.org/events-calendar' worker/discovery-anchors.js
           grep -q 'trumbullbeekeepers.org' worker/discovery-anchors.js
           grep -q 'tcba-official-recurring' worker/discovery-anchors.js
-          grep -q 'trustedLocalAnchors' worker/coverage.js
+          grep -q 'diagnoseKnownLocalSources' worker/coverage.js
+          grep -q 'diagnosticLocalAnchors' worker/coverage.js
+          if grep -q 'augmentKnownLocalSources' worker/coverage.js; then
+            echo 'Production coverage must not inject diagnostic anchors'
+            exit 1
+          fi
       - name: Verify required legacy architecture markers
         run: |
           grep -q 'architecture: "organization-first"' worker/index.js
