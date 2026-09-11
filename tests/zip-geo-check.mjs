@@ -15,6 +15,15 @@ assert.ok(eligibleZips(15).some(x => x.zip === "44410"));
 assert.ok(!eligibleZips(15).some(x => x.zip === "44481"));
 assert.ok(!eligibleZips(30).some(x => x.zip === "44240"));
 
+// City-name collision regression checks: a matching Ohio city name by itself is
+// not geographic evidence. This blocks unrelated pages such as Burton Snowboards
+// and the Orwell Foundation from being assigned to Ohio merely because the city
+// name happens to match a local ZIP.
+assert.equal(passesHardZipGate("Burton Snowboards", 30), false);
+assert.equal(passesHardZipGate("About George Orwell | The Orwell Foundation", 30), false);
+assert.equal(passesHardZipGate("Burton Ohio historical organization", 30), true);
+assert.equal(passesHardZipGate("Orwell OH historical society", 30), true);
+
 // Independent-radius regression checks: one canonical ZIP map, three separate eligibility lenses.
 const groups50 = eligibleZips(50).map(x => x.zip);
 const events30 = eligibleZips(30).map(x => x.zip);
@@ -30,4 +39,4 @@ assert.equal(passesHardZipGate("local employer, Cortland OH 44410", 15), true);
 assert.equal(passesHardZipGate("warehouse job, Dunn NC 28334", 15), false);
 assert.equal(passesHardZipGate("Pennsylvania job 15201", 50), false);
 
-console.log("Verified ZIP geography, independent radius, and prefetch gate checks passed.");
+console.log("Verified ZIP geography, independent radius, city-collision protection, and prefetch gate checks passed.");
