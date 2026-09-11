@@ -1,6 +1,3 @@
-import { bestLocation } from './zip-geo.js';
-import { parseExclusions, isExcluded } from './exclusions.js';
-
 // Verified local sources retained as diagnostic fixtures. They must never be
 // injected into production discovery results; they tell us whether organic
 // discovery is still capable of finding known-good local organizations/events.
@@ -33,12 +30,5 @@ export function diagnoseKnownLocalSources(result={}) {
   });
 }
 
-// Legacy helper retained for isolated regression testing. Production coverage
-// does not call this function and therefore does not mask organic discovery.
-function clean(s){return String(s||'').replace(/<script[\s\S]*?<\/script>/gi,' ').replace(/<style[\s\S]*?<\/style>/gi,' ').replace(/<[^>]+>/g,' ').replace(/&nbsp;/gi,' ').replace(/&amp;/gi,'&').replace(/&quot;/gi,'\"').replace(/&#39;|&#x27;/gi,"'").replace(/\s+/g,' ').trim();}
-function fetchPage(url){return fetch(url,{redirect:'follow',headers:{'User-Agent':'Mozilla/5.0 (compatible; Opportunity-Finder/3.17)','Accept':'text/html,application/xhtml+xml,application/json,text/xml,*/*'}}).then(async r=>r.ok?{url:r.url||url,html:await r.text()}:null).catch(()=>null);}
-export async function augmentKnownLocalSources(result,{eventRadius=30,groupRadius=30,searchParams=new URLSearchParams()}={}){
-  // Intentionally disabled in the production path. Kept as a regression-test
-  // helper so historical anchor behavior can still be exercised in isolation.
-  return result;
-}
+// tcba-official-recurring remains a historical diagnostic marker only. TCBA
+// is deliberately not synthesized or injected into production discovery.
