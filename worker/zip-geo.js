@@ -44,9 +44,17 @@ const PHYSICAL_ADDRESS_RE=new RegExp(`\\b\\d{1,6}\\s+[A-Za-z0-9.'#&-]+(?:\\s+[A-
 function extractPhysicalAddresses(text) { const source=String(text||'').replace(/<[^>]+>/g,' '); return source.match(PHYSICAL_ADDRESS_RE)||[]; }
 function hasPhysicalAddress(text) { return extractPhysicalAddresses(text).length>0; }
 function passesHardAddressGate(text,radius=30) { const t=String(text||''); return hasPhysicalAddress(t) && resolveEvidence(t,radius).length>0; }
-// Cast-iron production gate: no physical address means no discovery result.
-function passesHardZipGate(text,radius=30) { return passesHardAddressGate(text,radius); }
-// ZIP/radius-only gate is retained for diagnostics and candidate calculations.
+// The discovery engine uses this as its prefetch gate. Search-result candidates
+// may have reliable ZIP/Ohio evidence but no street address in the snippet.
+// The strict physical-address requirement is enforced again by enrichLocation()
+// immediately before any result is exposed by coverage.js.
+function passesHardZipGate(text,radius=30) {
+  const t=String(text||'');
+  if(passesHardAddressGate(t,radius)) return true;
+  if(!/https?:\/\//i.test(t)) return false;
+  if(/(?:indeed|glassdoor|ziprecruiter|simplyhired|monster)\./i.test(t)) return false;
+  return passesZipProximityGate(t,radius);
+}
 function passesZipProximityGate(text,radius=30) { return resolveEvidence(text,radius).length>0; }
 function bestLocation(text,radius=30) { return resolveEvidence(text,radius).sort((a,b)=>a.distance-b.distance)[0]||null; }
 function enrichLocation(item,radius=30) { const source=`${item?.address||''} ${item?.location||''} ${item?.description||''} ${item?.url||''}`; if(!passesHardAddressGate(source,radius))return null; const best=bestLocation(source,radius); if(!best)return null; return {...item,zip:best.zip,city:item.city||best.city,state:item.state||'OH',distance:best.distance,distanceMiles:best.distance,location:`${item.city||best.city}, ${item.state||'OH'} ${best.zip}`}; }
