@@ -23,8 +23,10 @@ jobs:
         run: node --check worker/index.js
       - name: Validate coverage layer syntax
         run: node --check worker/coverage.js
-      - name: Validate configurable discovery syntax
-        run: node --check worker/discovery.js && node --check worker/exclusions.js
+      - name: Validate active discovery engine syntax
+        run: node --check worker/discovery-v2.js && node --check worker/exclusions.js
+      - name: Validate legacy discovery syntax
+        run: node --check worker/discovery.js
       - name: Validate legacy organic discovery syntax
         run: node --check worker/organic.js
       - name: Validate legacy job discovery syntax
@@ -58,7 +60,7 @@ jobs:
           grep -q 'id="excludeEvents"' public/index.html
           grep -q 'id="excludeJobs"' public/index.html
           grep -q 'configurable-exclusions' worker/coverage.js
-          grep -q 'parseExclusions' worker/discovery.js
+          grep -q 'parseExclusions' worker/discovery-v2.js
       - name: Verify required legacy architecture markers
         run: |
           grep -q 'architecture: "organization-first"' worker/index.js
