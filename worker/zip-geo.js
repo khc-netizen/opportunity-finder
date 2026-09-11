@@ -17,7 +17,7 @@ const ZIP_REGION = [
   ['44440','Mineral Ridge',41.1369,-80.8063],['44064','Montville',41.5981,-81.0323],['44065','Newbury',41.4548,-81.2292],
   ['44057','Madison',41.7279,-80.7359],['44072','Novelty',41.4712,-81.3249],['44086','Thompson',41.6757,-81.0586],
   ['44088','Unionville',41.7833,-81.0034],['44085','Rome',41.6033,-80.8745],['44084','Rock Creek',41.6714,-80.8991],
-  ['44082','Pierpont',41.7619,-80.5675],['44047','Jefferson',41.7279,-80.7356],['44032','Dorset',41.6692,-80.6701],
+  ['44082','Pierpont',41.7619,-80.5675],['44047','Jefferson',41.7279,-80.7357],['44032','Dorset',41.6692,-80.6701],
   ['44041','Geneva',41.7770,-80.9500],['44033','East Claridon',41.5333,-81.1112],['44026','Chesterland',41.4462,-81.4030],
   ['44023','Chagrin Falls',41.3848,-81.2857],['44022','Chagrin Falls',41.4462,-81.4030],['44093','Williamsfield',41.5362,-80.6132]
 ];
@@ -38,23 +38,15 @@ function escapeRegExp(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g,'\\$&'
 function cityEvidence(text,radius=30) { const t=String(text||'').toLowerCase(),found=[]; for(const [city,zips] of Object.entries(CITY_TO_ZIPS)) if(new RegExp(`\\b${escapeRegExp(city)}\\b`,'i').test(t)) for(const zip of zips){const distance=distanceForZip(zip);if(distance!==null&&distance<=Number(radius))found.push({zip,city:ZIP_TO_CITY[zip],distance,source:'city-map'});} return found; }
 function zipEvidence(text,radius=30) { return extractZips(text).map(zip=>{const distance=distanceForZip(zip);return{zip,city:ZIP_TO_CITY[zip]||'',distance,allowed:isAllowedZip(zip,radius),source:'explicit-zip'};}); }
 function hasOhioEvidence(text) { return /\b(?:ohio|oh)\b/i.test(String(text||'')); }
-function resolveEvidence(text,radius=30) {
-  const explicit=zipEvidence(text,radius).filter(x=>x.allowed);
-  if(explicit.length)return explicit;
-  return hasOhioEvidence(text) ? cityEvidence(text,radius) : [];
-}
-
-// Physical-address evidence is deliberately stricter than ZIP evidence.
-// P.O. boxes and city/ZIP-only mentions are not physical locations.
+function resolveEvidence(text,radius=30) { const explicit=zipEvidence(text,radius).filter(x=>x.allowed); if(explicit.length)return explicit; return hasOhioEvidence(text) ? cityEvidence(text,radius) : []; }
 const STREET_TYPE_RE='(?:street|st|road|rd|avenue|ave|drive|dr|lane|ln|boulevard|blvd|highway|hwy|parkway|pkwy|circle|cir|court|ct|trail|trl|way|place|pl|terrace|ter|route|rte)';
 const PHYSICAL_ADDRESS_RE=new RegExp(`\\b\\d{1,6}\\s+[A-Za-z0-9.'#&-]+(?:\\s+[A-Za-z0-9.'#&-]+){0,6}\\s+${STREET_TYPE_RE}\\b[^\\n]{0,100}?,?\\s+[A-Za-z .'-]+,?\\s+OH(?:IO)?\\s+\\d{5}(?:-\\d{4})?\\b`,'i');
 function extractPhysicalAddresses(text) { const source=String(text||'').replace(/<[^>]+>/g,' '); return source.match(PHYSICAL_ADDRESS_RE)||[]; }
 function hasPhysicalAddress(text) { return extractPhysicalAddresses(text).length>0; }
 function passesHardAddressGate(text,radius=30) { const t=String(text||''); return hasPhysicalAddress(t) && resolveEvidence(t,radius).length>0; }
-// Hard production gate: every discovery result must have a physical Ohio address
-// and an eligible ZIP. This is the cast-iron rule used by discovery-v2.
+// Cast-iron production gate: no physical address means no discovery result.
 function passesHardZipGate(text,radius=30) { return passesHardAddressGate(text,radius); }
-// Use this only for non-result ZIP/radius calculations and diagnostics.
+// ZIP/radius-only gate is retained for diagnostics and candidate calculations.
 function passesZipProximityGate(text,radius=30) { return resolveEvidence(text,radius).length>0; }
 function bestLocation(text,radius=30) { return resolveEvidence(text,radius).sort((a,b)=>a.distance-b.distance)[0]||null; }
 function enrichLocation(item,radius=30) { const source=`${item?.address||''} ${item?.location||''} ${item?.description||''} ${item?.url||''}`; if(!passesHardAddressGate(source,radius))return null; const best=bestLocation(source,radius); if(!best)return null; return {...item,zip:best.zip,city:item.city||best.city,state:item.state||'OH',distance:best.distance,distanceMiles:best.distance,location:`${item.city||best.city}, ${item.state||'OH'} ${best.zip}`}; }
