@@ -54,13 +54,20 @@ jobs:
           grep -q 'id="eventRadius"' public/index.html
           grep -q 'id="jobRadius"' public/index.html
       - name: Validate configurable exclusions
+        shell: bash
         run: |
           grep -q 'id="excludeGlobal"' public/index.html
           grep -q 'id="excludeGroups"' public/index.html
           grep -q 'id="excludeEvents"' public/index.html
           grep -q 'id="excludeJobs"' public/index.html
           grep -q 'configurable-exclusions' worker/coverage.js
-          grep -q 'parseExclusions' worker/discovery-v2.js
+          node - <<'NODE'
+          const fs = require('fs');
+          const s = fs.readFileSync('worker/discovery-v2.js', 'utf8');
+          if (!s.includes('parseExclusions') || !s.includes('isExcluded') || !s.includes('exclusionQuery')) {
+            throw new Error('Active discovery-v2 exclusion hooks are missing');
+          }
+          NODE
       - name: Verify required legacy architecture markers
         run: |
           grep -q 'architecture: "organization-first"' worker/index.js
