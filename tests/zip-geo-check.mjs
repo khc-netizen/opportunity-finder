@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
-import { HOME_ZIP, eligibleZips, distanceForZip, isAllowedZip, passesHardZipGate, bestLocation } from "../worker/zip-geo.js";
+import { HOME_ZIP, eligibleZips, distanceForZip, isAllowedZip, passesHardZipGate, passesHardAddressGate, hasPhysicalAddress, bestLocation } from "../worker/zip-geo.js";
 
 assert.equal(HOME_ZIP, "44439");
 assert.equal(distanceForZip("44439", 30), 0);
 assert.equal(distanceForZip("44240", 30), null, "Kent 44240 is outside the 30-mile ZIP radius");
 assert.equal(isAllowedZip("44410", 30), true);
 assert.equal(isAllowedZip("44240", 30), false);
+
+// ZIP proximity remains independently testable, but a ZIP/city mention alone is
+// no longer sufficient for a production discovery result.
 assert.equal(passesHardZipGate("Mesopotamia OH 44439", 30), true);
 assert.equal(passesHardZipGate("Dunn NC 28334", 30), false);
 assert.equal(passesHardZipGate("https://www.indeed.com/q-Warehouse-l-Dunn,-NC-jobs.html", 30), false);
@@ -24,6 +27,21 @@ assert.equal(passesHardZipGate("About George Orwell | The Orwell Foundation", 30
 assert.equal(passesHardZipGate("Burton Ohio historical organization", 30), true);
 assert.equal(passesHardZipGate("Orwell OH historical society", 30), true);
 
+// CAST-IRON PRODUCTION ADDRESS GATE.
+// A result must have a physical street address, Ohio, and an eligible ZIP.
+const wraba = "Western Reserve Artist Blacksmith Association, 14653 E Park St, Burton, OH 44021";
+const tcba = "Trumbull County Beekeepers Association, 520 W Main St #1, Cortland, OH 44410";
+assert.equal(hasPhysicalAddress(wraba), true);
+assert.equal(hasPhysicalAddress(tcba), true);
+assert.equal(passesHardAddressGate(wraba, 30), true);
+assert.equal(passesHardAddressGate(tcba, 15), true);
+assert.equal(passesHardAddressGate("Trumbull County Beekeepers Association, Cortland OH 44410", 15), false, "city/ZIP without street address must be rejected");
+assert.equal(passesHardAddressGate("Mesopotamia OH 44439", 30), false, "ZIP without street address must be rejected");
+assert.equal(passesHardAddressGate("P.O. Box 123, Cortland OH 44410", 15), false, "P.O. boxes are not physical addresses");
+assert.equal(passesHardAddressGate("14653 E Park St, Burton, OH 44021", 15), false, "valid address outside selected radius must be rejected");
+assert.equal(passesHardAddressGate("14653 E Park St, Burton, OH 44021", 30), true);
+assert.equal(passesHardAddressGate("100 Main St, Dunn NC 28334", 50), false, "out-of-state physical addresses must be rejected");
+
 // Independent-radius regression checks: one canonical ZIP map, three separate eligibility lenses.
 const groups50 = eligibleZips(50).map(x => x.zip);
 const events30 = eligibleZips(30).map(x => x.zip);
@@ -39,4 +57,4 @@ assert.equal(passesHardZipGate("local employer, Cortland OH 44410", 15), true);
 assert.equal(passesHardZipGate("warehouse job, Dunn NC 28334", 15), false);
 assert.equal(passesHardZipGate("Pennsylvania job 15201", 50), false);
 
-console.log("Verified ZIP geography, independent radius, city-collision protection, and prefetch gate checks passed.");
+console.log("Verified ZIP geography, independent radius, city-collision protection, and cast-iron physical-address gate checks passed.");
