@@ -62,7 +62,7 @@ jobs:
           grep -q 'id="excludeGroups"' public/index.html
           grep -q 'id="excludeEvents"' public/index.html
           grep -q 'id="excludeJobs"' public/index.html
-          grep -q 'configurable-exclusions' worker/coverage.js
+          grep -q 'configurableExclusions:true' worker/coverage.js
           node - <<'NODE'
           const fs = require('fs');
           const s = fs.readFileSync('worker/discovery-v2.js', 'utf8');
