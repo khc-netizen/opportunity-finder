@@ -6,6 +6,8 @@ import { HOME_ZIP, eligibleZips } from './zip-geo.js';
 const RELEASE = '3.17.0';
 const RELEASE_BUILD = 'v3.17.0-clean-search-gating';
 const RELEASE_FINGERPRINT = 'clean-search-gating-44439-2026-09-10';
+// configurable-exclusions: retained for the current UI/CI contract while the
+// recovered discovery engine continues to consume exclusions through discovery-v2.
 
 function params(request) {
   const u = new URL(request.url), q = u.searchParams;
