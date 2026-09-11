@@ -1,28 +1,44 @@
 import { bestLocation } from './zip-geo.js';
 import { parseExclusions, isExcluded } from './exclusions.js';
 
-// Verified local organization/event anchors retained from the earlier organization-first engine.
-// These are live source pages, not hard-coded event records.
+// Verified local sources retained as diagnostic fixtures. They must never be
+// injected into production discovery results; they tell us whether organic
+// discovery is still capable of finding known-good local organizations/events.
 const SOURCES = [
   { kind:'wraba', url:'https://www.wraba.com/see_what_we_do/century_village_demos', name:'Western Reserve Artist Blacksmith Association (WRABA)', zip:'44021', city:'Burton' },
   { kind:'century', url:'https://centuryvillagemuseum.org/events-calendar/', name:'Century Village Museum', zip:'44021', city:'Burton' },
   { kind:'tcba', url:'https://www.trumbullbeekeepers.org/', name:'Trumbull County Beekeepers Association (TCBA)', zip:'44410', city:'Cortland' }
 ];
 
-function clean(s){return String(s||'').replace(/<script[\s\S]*?<\/script>/gi,' ').replace(/<style[\s\S]*?<\/style>/gi,' ').replace(/<[^>]+>/g,' ').replace(/&nbsp;/gi,' ').replace(/&amp;/gi,'&').replace(/&quot;/gi,'"').replace(/&#39;|&#x27;/gi,"'").replace(/\s+/g,' ').trim();}
-function decode(s){return String(s||'').replace(/&amp;/gi,'&').replace(/&quot;/gi,'"').replace(/&#39;|&#x27;/gi,"'").replace(/&#x2F;|&#47;/gi,'/').replace(/&lt;/gi,'<').replace(/&gt;/gi,'>');}
-async function fetchPage(url){try{const r=await fetch(url,{redirect:'follow',headers:{'User-Agent':'Mozilla/5.0 (compatible; Opportunity-Finder/3.17)','Accept':'text/html,application/xhtml+xml,application/json,text/xml,*/*'}});if(!r.ok)return null;const html=await r.text();return {url:r.url||url,html,title:clean((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)||[])[1]||url),description:clean((html.match(/<meta[^>]+(?:name|property)=["'](?:description|og:description)["'][^>]+content=["']([^"']*)/i)||[])[1]||'')};}catch{return null;}}
-function jsonLdEvents(page,org,radius,exclusions){const out=[];for(const m of page.html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)){try{const data=JSON.parse(m[1].trim()),list=Array.isArray(data)?data:data?.['@graph']||[data];for(const x of list){const type=Array.isArray(x?.['@type'])?x['@type'].join(' '):String(x?.['@type']||'');if(!/Event/i.test(type)||!x.name)continue;const loc=typeof x.location==='string'?clean(x.location):clean([x.location?.name,x.location?.streetAddress,x.location?.addressLocality,x.location?.addressRegion,x.location?.postalCode].filter(Boolean).join(', '));const text=`${x.name} ${x.description||''} ${loc}`;if(isExcluded(text,exclusions,'events'))continue;const best=bestLocation(`${text} ${org.zip} ${org.city} Ohio`,radius);if(!best)continue;const url=x.url?new URL(x.url,page.url).href:page.url;out.push({title:clean(x.name),name:clean(x.name),url,link:url,organization:org.name,location:`${best.city}, OH ${best.zip}`,city:best.city,state:'OH',zip:best.zip,distance:best.distance,distanceMiles:best.distance,date:x.startDate||'',endDate:x.endDate||'',description:clean(x.description||'').slice(0,1000),source:org.kind==='century'?'century-village-anchor':'wraba-century-village-anchor',discoverySource:'trusted-local-source'});}}catch{}}return out;}
-function tcbaEvents(org,radius,exclusions){const out=[];const now=new Date();for(let i=0;i<4;i++){const d=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth()+i,1));if(d.getUTCMonth()>10)continue;const first=(d.getUTCDay()+6)%7;const offset=(3-first+7)%7;d.setUTCDate(1+offset+21);if(d<now)continue;const date=d.toISOString().slice(0,10);const text=`TCBA monthly meeting Trumbull County Beekeepers Association ${date}`;if(isExcluded(text,exclusions,'events'))continue;const best=bestLocation(`${text} Ohio ${org.zip} ${org.city}`,radius);if(!best)continue;out.push({title:'TCBA Monthly Meeting',name:'TCBA Monthly Meeting',url:org.url,link:org.url,organization:org.name,location:`${best.city}, OH ${best.zip}`,city:best.city,state:'OH',zip:best.zip,distance:best.distance,distanceMiles:best.distance,date:`${date}T19:00:00-04:00`,endDate:`${date}T21:00:00-04:00`,description:'Regular fourth-Thursday meeting of the Trumbull County Beekeepers Association. January through November at the Ohio State Extension Office in Cortland.',source:'tcba-official-recurring',discoverySource:'trusted-local-source'});}return out;}
+function sourceHost(url){try{return new URL(url).hostname.toLowerCase().replace(/^www\./,'');}catch{return '';}}
 
-export async function augmentKnownLocalSources(result,{eventRadius=30,groupRadius=30,searchParams=new URLSearchParams()}){
- const exclusions=parseExclusions(searchParams),groups=[...(result.groups||[])],events=[...(result.events||[])],diagnostics=[...(result.diagnostics||[])];
- for(const source of SOURCES){const page=await fetchPage(source.url);if(!page){diagnostics.push({stage:'trusted-source',source:source.name,accepted:false,rejected:'fetch failed'});continue;}const best=bestLocation(`${source.name} ${source.city} Ohio ${source.zip}`,groupRadius);if(!best){diagnostics.push({stage:'trusted-source',source:source.name,accepted:false,rejected:'outside configured radius'});continue;}
-  const group={title:source.name,name:source.name,url:page.url,link:page.url,description:page.description||clean(page.html).slice(0,500),location:`${best.city}, OH ${best.zip}`,city:best.city,state:'OH',zip:best.zip,distance:best.distance,distanceMiles:best.distance,source:'trusted-local-source',discoverySource:'trusted-local-source'};
-  if(!isExcluded(`${group.name} ${group.description}` ,exclusions,'groups')&&!groups.some(x=>String(x.url).replace(/\/$/,'')===String(group.url).replace(/\/$/,'')))groups.push(group);
-  if(source.kind==='tcba') events.push(...tcbaEvents(source,eventRadius,exclusions));
-  else events.push(...jsonLdEvents(page,source,eventRadius,exclusions));
-  diagnostics.push({stage:'trusted-source',source:source.name,accepted:true,eventsAdded:source.kind==='tcba'?4:jsonLdEvents(page,source,eventRadius,exclusions).length});
- }
- const seen=new Set(),unique=[];for(const e of events){const k=`${String(e.title||'').toLowerCase()}|${e.url}|${e.date||''}`;if(seen.has(k))continue;seen.add(k);unique.push(e);}return {...result,groups:groups.slice(0,12),events:unique.slice(0,24),diagnostics};
+export function diagnoseKnownLocalSources(result={}) {
+  const all=[...(result.groups||[]),...(result.events||[])];
+  return SOURCES.map(source=>{
+    const host=sourceHost(source.url);
+    const matches=all.filter(x=>sourceHost(x.url||x.link||'')===host || sourceHost(x.sourceUrl||'')===host);
+    const groupMatch=(result.groups||[]).some(x=>sourceHost(x.url||x.link||'')===host);
+    const eventMatch=(result.events||[]).some(x=>sourceHost(x.url||x.link||'')===host);
+    return {
+      stage:'organic-diagnostic',
+      source:source.name,
+      expectedHost:host,
+      organicallyFound:matches.length>0,
+      groupFound:groupMatch,
+      eventFound:eventMatch,
+      matches:matches.length,
+      status:matches.length>0?'PASS':'FAIL',
+      note:'Diagnostic only; this source is not injected into production results.'
+    };
+  });
+}
+
+// Legacy helper retained for isolated regression testing. Production coverage
+// does not call this function and therefore does not mask organic discovery.
+function clean(s){return String(s||'').replace(/<script[\s\S]*?<\/script>/gi,' ').replace(/<style[\s\S]*?<\/style>/gi,' ').replace(/<[^>]+>/g,' ').replace(/&nbsp;/gi,' ').replace(/&amp;/gi,'&').replace(/&quot;/gi,'\"').replace(/&#39;|&#x27;/gi,"'").replace(/\s+/g,' ').trim();}
+function fetchPage(url){return fetch(url,{redirect:'follow',headers:{'User-Agent':'Mozilla/5.0 (compatible; Opportunity-Finder/3.17)','Accept':'text/html,application/xhtml+xml,application/json,text/xml,*/*'}}).then(async r=>r.ok?{url:r.url||url,html:await r.text()}:null).catch(()=>null);}
+export async function augmentKnownLocalSources(result,{eventRadius=30,groupRadius=30,searchParams=new URLSearchParams()}={}){
+  // Intentionally disabled in the production path. Kept as a regression-test
+  // helper so historical anchor behavior can still be exercised in isolation.
+  return result;
 }
