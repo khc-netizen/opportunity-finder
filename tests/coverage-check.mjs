@@ -2,13 +2,13 @@ import fs from "node:fs";
 import assert from "node:assert/strict";
 
 const coverage = fs.readFileSync("worker/coverage.js", "utf8");
-const discovery = fs.readFileSync("worker/discovery.js", "utf8");
+const discovery = fs.readFileSync("worker/discovery-v2.js", "utf8");
 const exclusions = fs.readFileSync("worker/exclusions.js", "utf8");
 const geo = fs.readFileSync("worker/zip-geo.js", "utf8");
 const wrangler = fs.readFileSync("wrangler.toml", "utf8");
 
 assert.match(coverage, /import baseWorker from ['"]\.\/index\.js['"]/);
-assert.match(coverage, /import \{ discoverAll \} from ['"]\.\/discovery\.js['"]/);
+assert.match(coverage, /import \{ discoverAll \} from ['"]\.\/discovery-v2\.js['"]/);
 assert.match(coverage, /groupRadius/);
 assert.match(coverage, /eventRadius/);
 assert.match(coverage, /jobRadius/);
